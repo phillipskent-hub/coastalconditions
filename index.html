@@ -4,60 +4,238 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Coastal Conditions</title>
+  <meta name="description" content="Rip current risk, surf, tides, water temperature and marine forecast for any lower-48 US ocean beach, from NOAA.">
+  <meta property="og:title" content="Coastal Conditions">
+  <meta property="og:description" content="Your daily check on tides, surf, rip currents and nearshore waters, straight from NOAA.">
+  <meta property="og:type" content="website">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Manrope:wght@400;500;600;700&display=swap">
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 1rem auto; padding: 0 1rem; line-height: 1.4; }
-    .alert { background: #fdd; border: 1px solid #c00; padding: .5rem; margin-bottom: .5rem; }
-    .err { color: #c00; }
-    table { border-collapse: collapse; }
-    td, th { padding: .2rem .8rem .2rem 0; text-align: left; }
-    small, footer { color: #666; }
-    form { display: flex; flex-wrap: wrap; gap: .4rem; }
-    form input { flex: 1 1 14rem; padding: .3rem; }
-    select { max-width: 100%; }
-    label { display: block; margin: .3rem 0; }
-    [hidden] { display: none; }
-    .risk { padding: 0 .35rem; border-radius: 3px; font-weight: bold; }
-    .risk-high { background: #c00; color: #fff; }
-    .risk-moderate { background: #f0a000; }
-    .risk-low { background: #9d9; }
+    /* Design tokens from the Lovable template (src/styles.css). */
+    :root {
+      --radius: 1rem;
+      --risk-high: oklch(0.55 0.2 27);
+      --risk-high-foreground: oklch(0.99 0 0);
+      --risk-moderate: oklch(0.8 0.15 75);
+      --risk-low: oklch(0.8 0.12 165);
+      --alert: oklch(0.95 0.04 50);
+      --background: oklch(0.975 0.012 85);
+      --foreground: oklch(0.24 0.05 245);
+      --card: oklch(0.995 0.004 85);
+      --primary: oklch(0.5 0.1 220);
+      --secondary: oklch(0.94 0.02 210);
+      --muted: oklch(0.95 0.012 85);
+      --muted-foreground: oklch(0.5 0.03 240);
+      --accent: oklch(0.82 0.1 70);
+      --accent-foreground: oklch(0.28 0.06 50);
+      --destructive: oklch(0.55 0.2 27);
+      --border: oklch(0.9 0.015 85);
+      --input: oklch(0.88 0.02 85);
+      --ring: oklch(0.5 0.1 220);
+      --deep-foreground: oklch(0.97 0.015 85);
+      --water: oklch(0.6 0.1 210);
+      --gradient-sea: linear-gradient(160deg, oklch(0.28 0.07 248) 0%, oklch(0.42 0.09 225) 55%, oklch(0.6 0.09 200) 100%);
+      --shadow-card: 0 1px 2px oklch(0.24 0.05 245 / 6%), 0 8px 24px -12px oklch(0.24 0.05 245 / 18%);
+      --font-display: "Fraunces", Georgia, serif;
+      --font-sans: "Manrope", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; border-color: var(--border); }
+    body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--font-sans); line-height: 1.5; }
+    h1, h2, p { margin: 0; }
+    button, input, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    [hidden] { display: none !important; }
+    .display { font-family: var(--font-display); font-weight: 500; }
+    .muted { color: var(--muted-foreground); }
+    .small { font-size: .875rem; }
+    .tiny { font-size: .75rem; }
+    .wrap { max-width: 64rem; margin: 0 auto; padding: 0 1.25rem; }
+
+    /* Header band */
+    .sea { background-image: var(--gradient-sea); color: var(--deep-foreground); }
+    .sea .wrap { padding-top: 1.5rem; padding-bottom: 7rem; }
+    .topline { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+    .brand { font-size: 1.25rem; letter-spacing: -.01em; }
+    .brand span { color: var(--accent); }
+    #updated { opacity: .75; }
+    form { margin-top: 1.5rem; display: flex; flex-wrap: wrap; gap: .5rem; }
+    form input {
+      flex: 1 1 16rem; min-width: 0; border-radius: 999px; padding: .75rem 1.25rem; color: var(--deep-foreground);
+      border: 1px solid color-mix(in oklch, var(--deep-foreground) 20%, transparent);
+      background: color-mix(in oklch, var(--deep-foreground) 10%, transparent); backdrop-filter: blur(8px);
+    }
+    form input::placeholder { color: color-mix(in oklch, var(--deep-foreground) 60%, transparent); }
+    form input:focus { outline: none; box-shadow: 0 0 0 2px var(--accent); background: color-mix(in oklch, var(--deep-foreground) 15%, transparent); }
+    .btn { border-radius: 999px; padding: .75rem 1.25rem; border: 0; transition: filter .15s, background .15s; }
+    .btn-accent { background: var(--accent); color: var(--accent-foreground); font-weight: 600; }
+    .btn-accent:hover { filter: brightness(1.05); }
+    .btn-accent:disabled { opacity: .6; cursor: default; }
+    .btn-ghost { background: transparent; border: 1px solid color-mix(in oklch, var(--deep-foreground) 30%, transparent); font-weight: 500; }
+    .btn-ghost:hover { background: color-mix(in oklch, var(--deep-foreground) 10%, transparent); }
+    .hero { margin-top: 2.5rem; }
+    .hero.intro { margin-top: 3rem; max-width: 36rem; }
+    .hero h1 { font-size: 2.25rem; line-height: 1.15; }
+    .hero .sub { margin-top: .25rem; opacity: .8; }
+    .hero.intro .sub { margin-top: .75rem; opacity: .85; }
+    #alternatives { margin-top: .75rem; opacity: .8; }
+    #alternatives button { background: none; border: 0; padding: 0; text-decoration: underline; text-underline-offset: 2px; }
+    #status { margin-top: 1rem; opacity: .9; }
+    @media (min-width: 640px) { .hero h1 { font-size: 3rem; } }
+
+    /* Cards */
+    main.wrap { margin-top: -5rem; display: flex; flex-direction: column; gap: 1.25rem; padding-bottom: 4rem; }
+    /* Before a place is picked there are no cards to overlap the header, so don't pull content up into it. */
+    body:not(.has-place) .sea .wrap { padding-bottom: 3rem; }
+    body:not(.has-place) main.wrap { margin-top: 1.5rem; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: calc(var(--radius) + 8px); box-shadow: var(--shadow-card); }
+    .section { padding: 1.25rem; }
+    @media (min-width: 640px) { .section { padding: 1.5rem; } }
+    .section-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: .75rem; margin-bottom: 1rem; }
+    .section-head h2 { font-size: 1.5rem; }
+    select {
+      max-width: 100%; border-radius: 999px; border: 1px solid var(--input); background: var(--card);
+      padding: .375rem .75rem; font-size: .875rem;
+    }
+    select:focus { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+
+    .glance { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+    @media (min-width: 768px) { .glance { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+    .glance .card { padding: 1rem; }
+    .label { font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--muted-foreground); }
+    .value { margin-top: .5rem; min-height: 2.25rem; font-family: var(--font-display); font-weight: 500; font-size: 1.875rem; line-height: 1.2; }
+    .value.wordy { font-size: 1.25rem; padding-top: .4rem; }
+    .glance .sub { margin-top: .25rem; font-size: .875rem; color: var(--muted-foreground);
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .trend { font-weight: 600; color: var(--primary); }
+
+    .alerts { display: flex; flex-direction: column; gap: .5rem; }
+    .alert-box { display: flex; gap: .75rem; padding: 1rem; border-radius: 1rem; background: var(--alert);
+      border: 1px solid color-mix(in oklch, var(--destructive) 30%, transparent); }
+    .alert-box .icon { color: var(--destructive); }
+    .alert-box p:first-child { font-weight: 600; }
+
+    .pill { display: inline-block; border-radius: 999px; font-weight: 600; padding: .125rem .5rem; font-size: .75rem; }
+    .pill.big { padding: .25rem .75rem; font-size: .875rem; font-family: var(--font-sans); vertical-align: middle; }
+    .pill.high { background: var(--risk-high); color: var(--risk-high-foreground); }
+    .pill.moderate { background: var(--risk-moderate); }
+    .pill.low { background: var(--risk-low); }
+    .headline-pill { display: inline-block; margin: 0 .5rem .75rem 0; border-radius: 999px; background: var(--alert);
+      color: var(--destructive); padding: .25rem .75rem; font-size: .75rem; font-weight: 600; }
+
+    .tide-chart { display: block; width: 100%; height: auto; }
+    .tide-grid { margin-top: 1rem; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+    @media (min-width: 640px) { .tide-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+    .tide-cell { border: 1px solid var(--border); border-radius: .75rem; padding: .5rem .75rem; }
+    .tide-cell.past { opacity: .45; }
+    .tide-cell.next { background: var(--secondary); }
+    .tide-cell .when { font-weight: 600; }
+    .tide-cell .when span { font-weight: 400; color: var(--muted-foreground); }
+
+    .two-col { display: grid; gap: 1.25rem; }
+    @media (min-width: 1024px) { .two-col { grid-template-columns: 3fr 2fr; align-items: start; } }
+    .period + .period { border-top: 1px solid var(--border); margin-top: 1rem; padding-top: 1rem; }
+    .period .name { font-family: var(--font-display); font-size: 1.125rem; }
+    dl { margin: .5rem 0 0; display: grid; grid-template-columns: auto 1fr; gap: .375rem 1rem; font-size: .875rem; }
+    dt { color: var(--muted-foreground); }
+    dd { margin: 0; }
+    .stack > * + * { margin-top: 1.25rem; }
+    .forecast { list-style: none; margin: 0; padding: 0; }
+    .forecast li { padding: .75rem 0; }
+    .forecast li:first-child { padding-top: 0; }
+    .forecast li + li { border-top: 1px solid var(--border); }
+    .forecast .row { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; }
+    .forecast .temp { font-family: var(--font-display); font-size: 1.5rem; }
+    .marine-grid { display: grid; gap: .75rem; }
+    @media (min-width: 640px) { .marine-grid { grid-template-columns: 1fr 1fr; } }
+    .marine-card { background: var(--muted); border-radius: .75rem; padding: 1rem; }
+    .marine-card .label { color: var(--primary); }
+
+    .skeleton > div { height: 1rem; border-radius: .25rem; background: var(--muted); animation: pulse 1.6s ease-in-out infinite; }
+    .skeleton > div + div { margin-top: .5rem; width: 50%; }
+    .skeleton > div:first-child { width: 66%; }
+    .value .skeleton-box { height: 2rem; width: 5rem; border-radius: .25rem; background: var(--muted); animation: pulse 1.6s ease-in-out infinite; }
+    @keyframes pulse { 50% { opacity: .5; } }
+    footer { padding-top: 1rem; text-align: center; }
   </style>
 </head>
 <body>
-  <form id="search">
-    <input id="q" type="search" placeholder="Beach or town, e.g. Nauset Beach" aria-label="Beach or town">
-    <button>Search</button>
-    <button type="button" id="here">Use my location</button>
-  </form>
-  <p id="status"></p>
+  <header class="sea">
+    <div class="wrap">
+      <div class="topline">
+        <p class="brand display">Coastal<span>·</span>Conditions</p>
+        <p id="updated" class="tiny"></p>
+      </div>
+      <form id="search">
+        <input id="q" type="search" placeholder="Search a beach or town, e.g. Nauset Beach" aria-label="Beach or town">
+        <button id="go" class="btn btn-accent">Search</button>
+        <button type="button" id="here" class="btn btn-ghost">◎ Near me</button>
+      </form>
+      <div id="intro" class="hero intro">
+        <h1 class="display">Your morning look at the water.</h1>
+        <p class="sub">Tides, surf, rip current risk and the marine forecast for any lower-48 ocean beach, straight from NOAA.
+          Pick a spot once; we'll remember it.</p>
+      </div>
+      <div id="placeHead" class="hero" hidden>
+        <h1 id="placeName" class="display"></h1>
+        <p id="placeSub" class="sub"></p>
+        <p id="alternatives" class="small"></p>
+      </div>
+      <p id="status" class="small" aria-live="polite"></p>
+    </div>
+  </header>
 
-  <div id="main" hidden>
-    <h1 id="place"></h1>
-    <p id="alternatives"></p>
-    <div id="alerts"></div>
-    <h2>At the beach</h2><div id="beach"></div>
-    <h2>Forecast</h2><div id="forecast"></div>
-    <h2>Tides</h2>
-    <label>Station <select id="station"></select></label>
-    <div id="tides"></div>
-    <h2>Nearshore waters</h2>
-    <label>Marine zone <select id="zone"></select></label>
-    <div id="marine"></div>
-    <p><small id="generated"></small></p>
-  </div>
+  <main class="wrap">
+    <div class="glance" id="glance"></div>
+    <div class="alerts" id="alerts"></div>
 
-  <footer><small>
-    Data: NOAA National Weather Service and NOAA CO-OPS tide predictions. Place search © OpenStreetMap contributors.
-    Not for navigation.
-  </small></footer>
+    <div id="details" class="stack" hidden>
+      <section class="card section">
+        <div class="section-head">
+          <h2 class="display">Tides</h2>
+          <select id="station" aria-label="Tide station"></select>
+        </div>
+        <div id="tides"></div>
+      </section>
+
+      <div class="two-col">
+        <section class="card section">
+          <div class="section-head"><h2 class="display">At the beach</h2></div>
+          <div id="beach"></div>
+        </section>
+        <section class="card section">
+          <div class="section-head"><h2 class="display">Forecast</h2></div>
+          <div id="forecast"></div>
+        </section>
+      </div>
+
+      <section class="card section">
+        <div class="section-head">
+          <h2 class="display">Nearshore waters</h2>
+          <select id="zone" aria-label="Marine zone"></select>
+        </div>
+        <div id="marine"></div>
+      </section>
+    </div>
+
+    <footer class="tiny muted">
+      Data: NOAA National Weather Service and NOAA CO-OPS tide predictions. Place search © OpenStreetMap contributors.
+      Not for navigation.
+    </footer>
+  </main>
 
   <script>
     const $ = id => document.getElementById(id);
     const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-    const failed = x => x && x.error ? `<p class="err">Unavailable: ${esc(x.error)}</p>` : null;
+    const failed = x => x && x.error ? `<p class="small muted">Unavailable right now: ${esc(x.error)}</p>` : null;
+    const skeleton = '<div class="skeleton"><div></div><div></div></div>';
     const status = msg => { $('status').textContent = msg || ''; };
+    const busy = on => { $('go').disabled = on; };
 
     let place = null;   // last /api/locate result
     let choice = {};    // { zone, station } the user is currently viewing
+    let cond = null;    // last /api/conditions result
 
     // "2026-10-30 15:07" (already local time from NOAA) -> "3:07 PM"
     function clock(t) {
@@ -66,53 +244,15 @@
       h = h % 12 || 12;
       return `${h}:${String(m).padStart(2, '0')} ${ap}`;
     }
+    // Minutes on a common scale for "YYYY-MM-DD HH:MM" local times (treated as UTC only so they compare).
+    const mins = t => Date.parse(t.replace(' ', 'T') + ':00Z') / 60000;
 
-    // Today's and tomorrow's tides; ones already past are dimmed. Times are compared as
-    // "YYYY-MM-DD HH:MM" strings in the location's own time zone, so the viewer's zone doesn't matter.
-    function renderTides(t) {
-      let rows = '', day = null;
-      for (const p of t.predictions) {
-        const d = p.time.slice(0, 10);
-        if (d !== day) {
-          day = d;
-          rows += `<tr><th colspan="3">${d === t.today ? 'Today' : 'Tomorrow'}</th></tr>`;
-        }
-        const past = p.time < t.now ? ' style="color:#999"' : '';
-        rows += `<tr${past}><td>${p.type}</td><td>${clock(p.time)}</td><td>${p.feet.toFixed(1)} ft</td></tr>`;
-      }
-      return `<table>${rows}</table><small>Feet above mean lower low water (MLLW).</small>`;
-    }
-
-    // "High" / "Moderate" / "Low" get a colored badge; anything else is shown as-is.
-    const risk = s => {
-      const level = (s.match(/\b(high|moderate|low)\b/i) || [])[1];
-      return level ? `<span class="risk risk-${level.toLowerCase()}">${esc(s)}</span>` : esc(s);
+    const RISK_ORDER = { low: 1, moderate: 2, high: 3 };
+    const riskLevel = s => (String(s).match(/\b(high|moderate|low)\b/i) || [])[1]?.toLowerCase();
+    const pill = (s, big) => {
+      const level = riskLevel(s);
+      return level ? `<span class="pill ${level}${big ? ' big' : ''}">${esc(s)}</span>` : esc(s);
     };
-
-    // Surf zone forecast periods (rip current risk first) plus measured water temperature.
-    function renderBeach(b, w) {
-      let html = '';
-      if (w) {
-        html += `<p><strong>Water temperature:</strong> ${w.fahrenheit.toFixed(1)}°F, measured at ${esc(w.name)}
-          (${w.km} km away) at ${clock(w.time)}.</p>`;
-      }
-      if (!b.available) {
-        return html + `<p>No current surf zone forecast from NWS ${esc(b.office)}. Many offices only issue one in
-          beach season; check the alerts above for rip current or beach hazard statements.</p>`;
-      }
-      html += b.headlines.map(h => `<p><strong>${esc(h)}</strong></p>`).join('');
-      for (const p of b.periods) {
-        html += `<p><strong>${esc(p.name)}:</strong> ${esc(p.text)}</p>`;
-        if (!p.fields.length) continue;
-        // Rip current risk first; it's the main reason a beach-goer looks at this.
-        const fields = [...p.fields].sort((a, c) => (c.label === 'Rip Current Risk') - (a.label === 'Rip Current Risk'));
-        html += '<table>' + fields.map(f => `<tr><td>${esc(f.label)}</td><td>${f.parts.map(x =>
-          (x.area ? esc(x.area) + ': ' : '') + (f.label === 'Rip Current Risk' ? risk(x.text) : esc(x.text))).join('<br>')}</td></tr>`).join('') +
-          '</table>';
-      }
-      if (b.area) html += `<small>Covers the beaches of ${esc(b.area)}. NWS Surf Zone Forecast.</small>`;
-      return html;
-    }
 
     async function getJson(url) {
       const r = await fetch(url);
@@ -127,34 +267,197 @@
       set(v) { try { localStorage.setItem('place', JSON.stringify(v)); } catch {} },
     };
 
+    // ---------- tide curve ----------
+    // Cosine-interpolated curve through the hi/lo points, with a dashed "now" line.
+    function tideChart(preds, now) {
+      if (preds.length < 2) return '';
+      const W = 640, H = 150, pad = 18;
+      const t0 = mins(preds[0].time), t1 = mins(preds.at(-1).time);
+      const lo = Math.min(...preds.map(p => p.feet)), hi = Math.max(...preds.map(p => p.feet));
+      const x = t => pad + ((t - t0) / (t1 - t0)) * (W - pad * 2);
+      const y = f => H - pad - ((f - lo) / (hi - lo || 1)) * (H - pad * 2.6);
+      const pts = [];
+      for (let i = 0; i < preds.length - 1; i++) {
+        const a = preds[i], b = preds[i + 1], ta = mins(a.time), tb = mins(b.time);
+        for (let s = 0; s <= 20; s++) {
+          const k = s / 20, f = a.feet + (b.feet - a.feet) * (1 - Math.cos(Math.PI * k)) / 2;
+          pts.push([x(ta + (tb - ta) * k), y(f)]);
+        }
+      }
+      const line = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join('');
+      const nowT = mins(now);
+      const marks = preds.map((p, i) => {
+        const px = x(mins(p.time)), py = y(p.feet);
+        const anchor = i === 0 ? 'start' : i === preds.length - 1 ? 'end' : 'middle';
+        return `<circle cx="${px}" cy="${py}" r="3.5" fill="var(--card)" stroke="var(--primary)" stroke-width="2"/>
+          <text x="${px}" y="${p.type === 'High' ? py - 9 : py + 16}" text-anchor="${anchor}" font-size="11"
+            fill="var(--muted-foreground)">${clock(p.time).replace(':00', '')}</text>`;
+      }).join('');
+      const nowMark = nowT >= t0 && nowT <= t1
+        ? `<line x1="${x(nowT)}" x2="${x(nowT)}" y1="8" y2="${H}" stroke="var(--accent)" stroke-width="2" stroke-dasharray="4 4"/>
+           <text x="${x(nowT)}" y="10" text-anchor="middle" font-size="11" font-weight="700" fill="var(--accent-foreground)">now</text>`
+        : '';
+      return `<svg class="tide-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Tide curve for today and tomorrow">
+        <defs><linearGradient id="tidefill" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stop-color="var(--water)" stop-opacity="0.45"/>
+          <stop offset="100%" stop-color="var(--water)" stop-opacity="0.04"/>
+        </linearGradient></defs>
+        <path d="${line}L${W - pad},${H}L${pad},${H}Z" fill="url(#tidefill)"/>
+        <path d="${line}" fill="none" stroke="var(--primary)" stroke-width="2.5" stroke-linecap="round"/>
+        ${marks}${nowMark}</svg>`;
+    }
+
+    // ---------- rendering ----------
+    function renderHeader() {
+      document.body.classList.toggle('has-place', !!place);
+      $('intro').hidden = !!place;
+      $('placeHead').hidden = !place;
+      $('updated').textContent = cond ? `Updated ${cond.generated}` : '';
+      if (!place) return;
+      const [first, ...rest] = place.name.split(',');
+      $('placeName').textContent = first;
+      $('placeSub').textContent = rest.join(',').trim();
+      $('alternatives').innerHTML = place.alternatives?.length
+        ? 'Not quite? ' + place.alternatives.map((a, i) => `<button type="button" data-alt="${i}">${esc(a.name)}</button>`).join(' · ')
+        : '';
+    }
+
+    // Four "at a glance" cards. Before conditions arrive they show skeletons.
+    function renderGlance() {
+      if (!place) { $('glance').innerHTML = ''; return; }
+      const ok = x => x && !x.error;
+      const loading = '<div class="skeleton-box"></div>';
+      const cards = [];
+
+      // Rip current: the worst risk across sub-areas (e.g. North/South of Cape Hatteras).
+      const beach = cond && ok(cond.beach) && cond.beach.available ? cond.beach : null;
+      const field = (label, p = beach?.periods[0]) => p?.fields.find(f => f.label === label);
+      const ripParts = field('Rip Current Risk')?.parts ?? [];
+      const worst = ripParts.reduce((w, p) => (RISK_ORDER[riskLevel(p.text)] || 0) > (RISK_ORDER[riskLevel(w?.text)] || 0) ? p : w, null);
+      const surf = field('Surf Height')?.parts.find(p => !worst?.area || p.area === worst.area) ?? field('Surf Height')?.parts[0];
+      cards.push({
+        label: 'Rip current',
+        value: !cond ? loading : worst ? pill(worst.text, true) : '—',
+        sub: worst?.area ? `${esc(worst.area)}${surf ? ' · surf ' + esc(surf.text.toLowerCase()) : ''}`
+          : surf ? 'Surf ' + esc(surf.text.toLowerCase()) : cond ? 'No surf zone forecast now' : 'Surf forecast',
+      });
+
+      // Next tide, with rising/falling.
+      const t = cond && ok(cond.tides) ? cond.tides : null;
+      const next = t?.predictions.find(p => p.time >= t.now);
+      const left = next ? Math.max(0, Math.round(mins(next.time) - mins(t.now))) : null;
+      cards.push({
+        label: next ? `Next ${next.type.toLowerCase()} tide` : 'Next tide',
+        value: !cond ? loading : next ? clock(next.time) : '—',
+        sub: next ? `<span class="trend">${next.type === 'High' ? '↑ Rising' : '↓ Falling'} · </span>${next.feet.toFixed(1)} ft · in ${Math.floor(left / 60)}h ${left % 60}m` : '',
+      });
+
+      // Water: measured if a sensor is nearby, otherwise the surf forecast's estimate.
+      const w = cond && ok(cond.waterTemp) ? cond.waterTemp : null;
+      const fcWater = field('Water Temperature')?.parts[0]?.text;
+      cards.push({
+        label: 'Water',
+        value: !cond ? loading : w ? `${Math.round(w.fahrenheit)}°F` : fcWater ? esc(fcWater) : '—',
+        wordy: !w && !!fcWater,
+        sub: w ? `at ${esc(w.name)} · ${w.km} km` : fcWater ? 'NWS surf forecast' : cond ? 'No sensor nearby' : '',
+      });
+
+      // Air: the first forecast period.
+      const now0 = cond && ok(cond.forecast) ? cond.forecast[0] : null;
+      cards.push({
+        label: now0?.name ?? 'Air',
+        value: !cond ? loading : now0 ? `${now0.temperature}°${esc(now0.unit)}` : '—',
+        sub: now0 ? `${esc(now0.short)} · ${esc(now0.wind)}` : '',
+      });
+
+      $('glance').innerHTML = cards.map(c => `<div class="card"><p class="label">${c.label}</p>
+        <div class="value${c.wordy ? ' wordy' : ''}">${c.value}</div><p class="sub">${c.sub}</p></div>`).join('');
+    }
+
+    function renderAlerts() {
+      const a = cond?.alerts;
+      $('alerts').innerHTML = !a || a.error ? '' : a.map(x => `<div class="alert-box"><span class="icon" aria-hidden="true">⚠</span>
+        <div><p>${esc(x.event)}</p><p class="small muted">${esc(x.headline)}</p></div></div>`).join('');
+    }
+
+    function renderTides(t) {
+      const next = t.predictions.find(p => p.time >= t.now);
+      const cells = t.predictions.map(p => {
+        const cls = p.time < t.now ? ' past' : p === next ? ' next' : '';
+        return `<div class="tide-cell${cls}"><p class="tiny muted">${p.time.slice(0, 10) === t.today ? 'Today' : 'Tomorrow'} · ${p.type}</p>
+          <p class="when">${clock(p.time)} <span>${p.feet.toFixed(1)} ft</span></p></div>`;
+      }).join('');
+      return tideChart(t.predictions, t.now) + `<div class="tide-grid">${cells}</div>
+        <p class="tiny muted" style="margin-top:.75rem">Heights in feet above mean lower low water (MLLW).</p>`;
+    }
+
+    // Surf zone forecast periods, rip current risk first.
+    function renderBeach(b) {
+      if (!b.available) {
+        return `<p class="small muted">No current surf zone forecast from NWS ${esc(b.office)}. Many offices only issue one in
+          beach season; check the alerts above for rip current or beach hazard statements.</p>`;
+      }
+      let html = b.headlines.map(h => `<p style="font-weight:600;margin-bottom:1rem">${esc(h)}</p>`).join('');
+      html += b.periods.map(p => {
+        const fields = [...p.fields].sort((a, c) => (c.label === 'Rip Current Risk') - (a.label === 'Rip Current Risk'));
+        return `<div class="period"><p class="name">${esc(p.name)}</p>
+          ${p.text ? `<p class="small muted" style="margin-top:.25rem">${esc(p.text)}</p>` : ''}
+          ${fields.length ? '<dl>' + fields.map(f => `<dt>${esc(f.label)}</dt><dd>${f.parts.map(x =>
+            `<div>${x.area ? `<span class="muted">${esc(x.area)}: </span>` : ''}${f.label === 'Rip Current Risk' ? pill(x.text) : esc(x.text)}</div>`).join('')}</dd>`).join('') + '</dl>' : ''}
+        </div>`;
+      }).join('');
+      if (b.area) html += `<p class="tiny muted" style="margin-top:1rem">Covers the beaches of ${esc(b.area)}. NWS Surf Zone Forecast.</p>`;
+      return html;
+    }
+
+    function renderForecast(f) {
+      return '<ul class="forecast">' + f.map(p => `<li><div class="row"><p style="font-weight:600">${esc(p.name)}</p>
+        <p class="temp">${esc(p.temperature)}°</p></div><p class="small">${esc(p.short)}</p>
+        <p class="tiny muted">Wind ${esc(p.wind)}</p></li>`).join('') + '</ul>';
+    }
+
+    function renderMarine(m) {
+      return m.headlines.map(h => `<span class="headline-pill">${esc(h)}</span>`).join('') +
+        '<div class="marine-grid">' + m.periods.map(p => `<div class="marine-card"><p class="label">${esc(p.name)}</p>
+          <p class="small" style="margin-top:.25rem">${esc(p.text)}</p></div>`).join('') + '</div>';
+    }
+
+    function renderDetails() {
+      $('details').hidden = !place;
+      if (!place) return;
+      $('tides').innerHTML = !cond ? skeleton : failed(cond.tides) ?? renderTides(cond.tides);
+      $('beach').innerHTML = !cond ? skeleton : failed(cond.beach) ?? renderBeach(cond.beach);
+      $('forecast').innerHTML = !cond ? skeleton : failed(cond.forecast) ?? renderForecast(cond.forecast);
+      $('marine').innerHTML = !cond ? skeleton : failed(cond.marine) ?? renderMarine(cond.marine);
+    }
+
+    function render() { renderHeader(); renderGlance(); renderAlerts(); renderDetails(); }
+
+    // ---------- data flow ----------
     async function locate(params, prefer = {}) {
+      busy(true);
       status('Finding that spot…');
+      let p;
       try {
-        place = await getJson('/api/locate?' + new URLSearchParams(params));
+        p = await getJson('/api/locate?' + new URLSearchParams(params));
       } catch (e) {
+        busy(false);
         return status(e.message);
       }
+      place = p;
+      cond = null;
       // Keep a previously chosen zone/station if it's still one of the options.
       choice = {
         zone: place.zones.some(z => z.id === prefer.zone) ? prefer.zone : place.zones[0]?.id,
         station: place.stations.some(s => s.id === prefer.station) ? prefer.station : place.stations[0].id,
       };
-      renderPlace();
-      loadConditions();
-    }
-
-    function renderPlace() {
-      $('main').hidden = false;
-      $('place').textContent = place.name;
-      $('alternatives').innerHTML = place.alternatives?.length
-        ? 'Not the right spot? ' + place.alternatives.map((a, i) => `<a href="#" data-alt="${i}">${esc(a.name)}</a>`).join(' · ')
-        : '';
       $('station').innerHTML = place.stations.map(s =>
-        `<option value="${s.id}">${esc(s.name)}, ${s.state} (${s.km} km${s.primary ? '' : ', estimated from nearby station'})</option>`).join('');
+        `<option value="${s.id}">${esc(s.name)}, ${s.state} · ${s.km} km${s.primary ? '' : ' (estimated)'}</option>`).join('');
       $('zone').innerHTML = place.zones.map(z =>
-        `<option value="${z.id}">${esc(z.name)} (${z.id}${z.km ? `, ${z.km} km` : ''})</option>`).join('');
+        `<option value="${z.id}">${esc(z.name)}${z.km ? ` · ~${z.km} km` : ''}</option>`).join('');
       $('station').value = choice.station;
       $('zone').value = choice.zone;
+      loadConditions();
     }
 
     // Put the location in the address bar (bookmarkable/shareable) and remember it for next visit.
@@ -164,32 +467,27 @@
       store.set(p);
     }
 
+    let request = 0; // ignore responses from superseded requests (e.g. quick station switches)
     async function loadConditions() {
       remember();
-      status('Loading conditions…');
+      const mine = ++request;
+      cond = null;
+      busy(true);
+      status('Checking the water…');
+      render();
       let d;
       try {
         d = await getJson('/api/conditions?' + new URLSearchParams({ lat: place.lat, lon: place.lon, zone: choice.zone, station: choice.station }));
       } catch (e) {
-        return status('Failed to load: ' + e.message);
+        if (mine !== request) return;
+        busy(false);
+        return status('Couldn’t load conditions: ' + e.message);
       }
+      if (mine !== request) return;
+      busy(false);
       status('');
-
-      $('alerts').innerHTML = failed(d.alerts) ?? d.alerts.map(a =>
-        `<div class="alert"><strong>${esc(a.event)}</strong> — ${esc(a.headline)}</div>`).join('');
-
-      $('beach').innerHTML = failed(d.beach) ?? renderBeach(d.beach, d.waterTemp?.error ? null : d.waterTemp);
-
-      $('forecast').innerHTML = failed(d.forecast) ?? d.forecast.map(p =>
-        `<p><strong>${esc(p.name)}:</strong> ${esc(p.temperature)}°${esc(p.unit)}, ${esc(p.short)}. Wind ${esc(p.wind)}.<br>${esc(p.detailed)}</p>`).join('');
-
-      $('tides').innerHTML = failed(d.tides) ?? renderTides(d.tides);
-
-      $('marine').innerHTML = failed(d.marine) ??
-        d.marine.headlines.map(h => `<p><strong>${esc(h)}</strong></p>`).join('') +
-        d.marine.periods.map(p => `<p><strong>${esc(p.name)}:</strong> ${esc(p.text)}</p>`).join('');
-
-      $('generated').textContent = `Fetched ${d.generated}`;
+      cond = d;
+      render();
     }
 
     $('search').addEventListener('submit', e => {
@@ -208,10 +506,8 @@
     });
 
     $('alternatives').addEventListener('click', e => {
-      const a = place.alternatives[e.target.dataset.alt];
-      if (!a) return;
-      e.preventDefault();
-      locate({ lat: a.lat, lon: a.lon, name: a.name });
+      const a = place?.alternatives[e.target.dataset.alt];
+      if (a) locate({ lat: a.lat, lon: a.lon, name: a.name });
     });
 
     $('station').addEventListener('change', e => { choice.station = e.target.value; loadConditions(); });
@@ -221,7 +517,6 @@
     const fromUrl = Object.fromEntries(new URLSearchParams(location.search));
     const start = fromUrl.lat ? fromUrl : store.get();
     if (start?.lat) locate({ lat: start.lat, lon: start.lon, ...(start.name && { name: start.name }) }, start);
-    else status('Search for a beach or town on the lower-48 ocean coast, or use your location.');
   </script>
 </body>
 </html>
