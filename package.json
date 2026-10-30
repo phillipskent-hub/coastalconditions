@@ -1,0 +1,13 @@
+{
+  "name": "plymouth-coastal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Personal coastal conditions page for Plymouth, MA",
+  "scripts": {
+    "dev": "node dev-server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

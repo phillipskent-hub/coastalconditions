@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plymouth Coastal Conditions</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 1rem auto; padding: 0 1rem; line-height: 1.4; }
+    .alert { background: #fdd; border: 1px solid #c00; padding: .5rem; margin-bottom: .5rem; }
+    .err { color: #c00; }
+    table { border-collapse: collapse; }
+    td, th { padding: .2rem .8rem .2rem 0; text-align: left; }
+    small { color: #666; }
+  </style>
+</head>
+<body>
+  <h1>Plymouth, MA</h1>
+  <div id="alerts"></div>
+  <h2>Forecast</h2><div id="forecast">Loading…</div>
+  <h2>Cape Cod Bay (ANZ231)</h2><div id="marine">Loading…</div>
+  <h2>Tides today <small>(Plymouth 8446493, ft MLLW)</small></h2><div id="tides">Loading…</div>
+  <p><small id="generated"></small></p>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const failed = x => x && x.error ? `<p class="err">Unavailable: ${esc(x.error)}</p>` : null;
+
+    // "2026-10-30 15:07" (already local time from NOAA) -> "3:07 PM"
+    function clock(t) {
+      let [h, m] = t.split(' ')[1].split(':').map(Number);
+      const ap = h >= 12 ? 'PM' : 'AM';
+      h = h % 12 || 12;
+      return `${h}:${String(m).padStart(2, '0')} ${ap}`;
+    }
+
+    fetch('/api/conditions')
+      .then(r => r.json())
+      .then(d => {
+        $('alerts').innerHTML = failed(d.alerts) ?? d.alerts.map(a =>
+          `<div class="alert"><strong>${esc(a.event)}</strong> — ${esc(a.headline)}</div>`).join('');
+
+        $('forecast').innerHTML = failed(d.forecast) ?? d.forecast.map(p =>
+          `<p><strong>${esc(p.name)}:</strong> ${esc(p.temperature)}°${esc(p.unit)}, ${esc(p.short)}. Wind ${esc(p.wind)}.<br>${esc(p.detailed)}</p>`).join('');
+
+        $('marine').innerHTML = failed(d.marine) ??
+          d.marine.headlines.map(h => `<p><strong>${esc(h)}</strong></p>`).join('') +
+          d.marine.periods.map(p => `<p><strong>${esc(p.name)}:</strong> ${esc(p.text)}</p>`).join('');
+
+        $('tides').innerHTML = failed(d.tides) ?? '<table>' + d.tides.map(t =>
+          `<tr><td>${t.type}</td><td>${clock(t.time)}</td><td>${t.feet.toFixed(1)} ft</td></tr>`).join('') + '</table>';
+
+        $('generated').textContent = `Fetched ${d.generated}`;
+      })
+      .catch(e => { $('forecast').innerHTML = `<p class="err">Failed to load: ${esc(e.message)}</p>`; });
+  </script>
+</body>
+</html>
