@@ -1,0 +1,4 @@
+# Files that exist for local dev / GitHub only; don't upload them to Vercel.
+README.md
+dev-server.js
+.claude
