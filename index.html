@@ -16,6 +16,10 @@
     select { max-width: 100%; }
     label { display: block; margin: .3rem 0; }
     [hidden] { display: none; }
+    .risk { padding: 0 .35rem; border-radius: 3px; font-weight: bold; }
+    .risk-high { background: #c00; color: #fff; }
+    .risk-moderate { background: #f0a000; }
+    .risk-low { background: #9d9; }
   </style>
 </head>
 <body>
@@ -30,6 +34,7 @@
     <h1 id="place"></h1>
     <p id="alternatives"></p>
     <div id="alerts"></div>
+    <h2>At the beach</h2><div id="beach"></div>
     <h2>Forecast</h2><div id="forecast"></div>
     <h2>Tides</h2>
     <label>Station <select id="station"></select></label>
@@ -76,6 +81,37 @@
         rows += `<tr${past}><td>${p.type}</td><td>${clock(p.time)}</td><td>${p.feet.toFixed(1)} ft</td></tr>`;
       }
       return `<table>${rows}</table><small>Feet above mean lower low water (MLLW).</small>`;
+    }
+
+    // "High" / "Moderate" / "Low" get a colored badge; anything else is shown as-is.
+    const risk = s => {
+      const level = (s.match(/\b(high|moderate|low)\b/i) || [])[1];
+      return level ? `<span class="risk risk-${level.toLowerCase()}">${esc(s)}</span>` : esc(s);
+    };
+
+    // Surf zone forecast periods (rip current risk first) plus measured water temperature.
+    function renderBeach(b, w) {
+      let html = '';
+      if (w) {
+        html += `<p><strong>Water temperature:</strong> ${w.fahrenheit.toFixed(1)}°F, measured at ${esc(w.name)}
+          (${w.km} km away) at ${clock(w.time)}.</p>`;
+      }
+      if (!b.available) {
+        return html + `<p>No current surf zone forecast from NWS ${esc(b.office)}. Many offices only issue one in
+          beach season; check the alerts above for rip current or beach hazard statements.</p>`;
+      }
+      html += b.headlines.map(h => `<p><strong>${esc(h)}</strong></p>`).join('');
+      for (const p of b.periods) {
+        html += `<p><strong>${esc(p.name)}:</strong> ${esc(p.text)}</p>`;
+        if (!p.fields.length) continue;
+        // Rip current risk first; it's the main reason a beach-goer looks at this.
+        const fields = [...p.fields].sort((a, c) => (c.label === 'Rip Current Risk') - (a.label === 'Rip Current Risk'));
+        html += '<table>' + fields.map(f => `<tr><td>${esc(f.label)}</td><td>${f.parts.map(x =>
+          (x.area ? esc(x.area) + ': ' : '') + (f.label === 'Rip Current Risk' ? risk(x.text) : esc(x.text))).join('<br>')}</td></tr>`).join('') +
+          '</table>';
+      }
+      if (b.area) html += `<small>Covers the beaches of ${esc(b.area)}. NWS Surf Zone Forecast.</small>`;
+      return html;
     }
 
     async function getJson(url) {
@@ -141,6 +177,8 @@
 
       $('alerts').innerHTML = failed(d.alerts) ?? d.alerts.map(a =>
         `<div class="alert"><strong>${esc(a.event)}</strong> — ${esc(a.headline)}</div>`).join('');
+
+      $('beach').innerHTML = failed(d.beach) ?? renderBeach(d.beach, d.waterTemp?.error ? null : d.waterTemp);
 
       $('forecast').innerHTML = failed(d.forecast) ?? d.forecast.map(p =>
         `<p><strong>${esc(p.name)}:</strong> ${esc(p.temperature)}°${esc(p.unit)}, ${esc(p.short)}. Wind ${esc(p.wind)}.<br>${esc(p.detailed)}</p>`).join('');

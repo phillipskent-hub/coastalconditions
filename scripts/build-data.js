@@ -5,6 +5,7 @@
 // data/tide-stations.js  – every CO-OPS tide-prediction station on the lower-48 ocean coasts
 // data/marine-zones.js   – simplified outlines of Atlantic/Gulf/Pacific coastal marine zones,
 //                          used to find the *nearest* zone when a beach sits just outside one
+// data/water-temp-stations.js – CO-OPS stations with a water temperature sensor, same coasts
 import { writeFile, mkdir } from 'node:fs/promises';
 
 const UA = 'plymouth-coastal-app (https://github.com/phillipskent-hub/plymouth-coastal)';
@@ -29,11 +30,23 @@ export function km(lat1, lon1, lat2, lon2) {
   return 12742 * Math.asin(Math.sqrt(a));
 }
 
+// Lower-48 ocean coasts only. CO-OPS ids 9000000-9399999 and 8311xxx are Great Lakes / St. Lawrence.
+const onOceanCoast = s => LOWER48_COASTAL.has(s.state) && s.lat > 24 && s.lat < 50 && s.lng < -66
+  && !/^(9[0-3]|8311)/.test(s.id);
+
 async function tideStations() {
   const { stations } = await getJson('https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=tidepredictions');
   return stations
-    .filter(s => LOWER48_COASTAL.has(s.state) && s.lat > 24 && s.lat < 50 && s.lng < -66)
+    .filter(onOceanCoast)
     .map(s => ({ id: s.id, name: s.name, state: s.state, lat: s.lat, lon: s.lng, primary: s.type === 'R' }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
+async function waterTempStations() {
+  const { stations } = await getJson('https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=watertemp');
+  return stations
+    .filter(onOceanCoast)
+    .map(s => ({ id: s.id, name: s.name, state: s.state, lat: s.lat, lon: s.lng }))
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
@@ -78,6 +91,10 @@ await mkdir('data', { recursive: true });
 const stations = await tideStations();
 await writeFile('data/tide-stations.js', header + 'export default ' + JSON.stringify(stations) + ';\n');
 console.log(`tide stations: ${stations.length} (${stations.filter(s => s.primary).length} primary)`);
+
+const temps = await waterTempStations();
+await writeFile('data/water-temp-stations.js', header + 'export default ' + JSON.stringify(temps) + ';\n');
+console.log(`water temperature stations: ${temps.length}`);
 
 const zones = await marineZones();
 await writeFile('data/marine-zones.js', header + 'export default ' + JSON.stringify(zones) + ';\n');

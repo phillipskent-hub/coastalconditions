@@ -10,7 +10,9 @@ const round = n => +Number(n).toFixed(3); // ~100 m; identical URLs let the CDN 
 // cache results, and credit OpenStreetMap on the page. The CDN cache below covers caching.
 async function geocode(q) {
   const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=us&limit=5&q=' + encodeURIComponent(q);
-  const results = await getJson(url);
+  const results = await getJson(url).catch(e => {
+    throw new Error(/\b429\b/.test(e.message) ? 'Place search is busy right now. Try again in a minute, or use your location.' : e.message);
+  });
   // "Galveston, TX" otherwise returns the county's center point (out in the bay) ahead of the city.
   const broad = r => ['county', 'state'].includes(r.addresstype) ? 1 : 0;
   results.sort((a, b) => broad(a) - broad(b));

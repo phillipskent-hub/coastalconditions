@@ -1,9 +1,15 @@
 // Serverless function: GET /api/conditions?lat=..&lon=..&zone=ANZ231&station=8446493
-// Fetches NWS forecast + alerts, the marine forecast for the zone, and NOAA tide
-// predictions, and returns them as one JSON payload for the page.
+// Fetches NWS forecast + alerts, the surf zone forecast (rip currents), the marine forecast
+// for the zone, NOAA tide predictions and measured water temperature, and returns them as
+// one JSON payload for the page.
 // Use /api/locate first to get the zone and station for a place.
 import { getJson, sendJson, query } from '../lib/http.js';
-import { findStation, findZone } from '../lib/geo.js';
+import { findStation, findZone, nearestTempStations } from '../lib/geo.js';
+import { segmentFor, headlines, surfZone } from '../lib/nws-text.js';
+
+const SRF_MAX_AGE_HOURS = 36;
+// Surf zone fields already covered elsewhere on the page.
+const SRF_SKIP = /^(Tides|Astronomical Tides|Weather|High Temperature|Winds?)$/;
 
 async function forecast(point) {
   const fc = await getJson(point.properties.forecast);
@@ -32,31 +38,8 @@ async function alerts(lat, lon, zone) {
   return [...seen.values()];
 }
 
-// UGC lines name the zones a bulletin segment covers, e.g. "ANZ230>232-250-AMZ150-310900-"
-// (">" is a range; the trailing 6 digits are an expiry time, not a zone).
-export function ugcZones(line) {
-  const ids = [];
-  let prefix = '';
-  for (const tok of line.split('-').filter(Boolean)) {
-    const m = tok.match(/^([A-Z]{2}Z)?(\d{3})(?:>(\d{3}))?$/);
-    if (!m) continue;
-    if (m[1]) prefix = m[1];
-    for (let n = +m[2]; n <= +(m[3] || m[2]); n++) ids.push(prefix + String(n).padStart(3, '0'));
-  }
-  return ids;
-}
-
 // Headlines like "...SMALL CRAFT ADVISORY IN EFFECT THROUGH SATURDAY MORNING..." only appear in the
-// text Coastal Waters Forecast (CWF), not the JSON. Find our zone's segment in the office's latest CWF.
-export function cwfHeadlines(text, zoneId) {
-  for (const segment of text.split('$$')) {
-    const ugc = segment.match(/^[A-Z]{2}Z\d{3}[-\d>A-Z\n]*?\d{6}-$/m);
-    if (!ugc || !ugcZones(ugc[0].replace(/\n/g, '')).includes(zoneId)) continue;
-    return [...segment.matchAll(/^\.\.\.([\s\S]+?)\.\.\.\s*$/gm)].map(m => m[1].replace(/\s+/g, ' ').trim());
-  }
-  return [];
-}
-
+// text Coastal Waters Forecast (CWF), not the JSON, so the office's latest CWF is fetched too.
 async function marine(zone) {
   const [json, cwf] = await Promise.all([
     getJson(`https://api.weather.gov/zones/forecast/${zone.id}/forecast`),
@@ -66,9 +49,51 @@ async function marine(zone) {
     zone: zone.id,
     name: zone.name,
     updated: json.properties.updated,
-    headlines: cwf ? cwfHeadlines(cwf.productText, zone.id) : [],
+    headlines: headlines(cwf && segmentFor(cwf.productText, [zone.id]) || ''),
     periods: json.properties.periods.slice(0, 2).map(p => ({ name: p.name, text: p.detailedForecast })),
   };
+}
+
+// Rip current risk, surf height, forecast water temp, UV: from the NWS Surf Zone Forecast (SRF).
+// Only some offices issue one, often only in beach season. Some use special narrow beach zones,
+// so match on every public zone containing the point, not just its normal forecast zone.
+async function beach(point, lat, lon) {
+  const office = point.properties.cwa;
+  const [srf, containing] = await Promise.all([
+    getJson(`https://api.weather.gov/products/types/SRF/locations/${office}/latest`).catch(() => null),
+    getJson(`https://api.weather.gov/zones?type=public&point=${lat},${lon}`).catch(() => null),
+  ]);
+  if (!srf?.productText) return { available: false, office };
+
+  const zoneIds = [point.properties.forecastZone.split('/').pop(), ...(containing?.features ?? []).map(f => f.properties.id)];
+  const segment = segmentFor(srf.productText, zoneIds);
+  if (!segment) return { available: false, office };
+
+  const ageHours = (Date.now() - Date.parse(srf.issuanceTime)) / 3600000;
+  if (ageHours > SRF_MAX_AGE_HOURS) return { available: false, office, lastIssued: srf.issuanceTime };
+
+  const area = segment.match(/^Including the beaches of ([\s\S]+?)\n\d/m)?.[1].replace(/\s+/g, ' ').trim();
+  return {
+    available: true,
+    office,
+    issued: srf.issuanceTime,
+    area,
+    headlines: headlines(segment),
+    periods: surfZone(segment).slice(0, 2).map(p => ({ ...p, fields: p.fields.filter(f => !SRF_SKIP.test(f.label)) })),
+  };
+}
+
+// Latest measured water temperature from the nearest CO-OPS sensor that reported in the last 3 hours.
+async function waterTemp(lat, lon) {
+  for (const s of nearestTempStations(lat, lon)) {
+    const url = 'https://api.tidesandcurrents.noaa.gov/api/prod/datagetter'
+      + `?product=water_temperature&station=${s.id}&range=3&units=english&time_zone=lst_ldt&format=json`
+      + '&application=plymouth-coastal-app';
+    const data = await getJson(url).catch(() => null);
+    const last = data?.data?.filter(d => d.v !== '').at(-1);
+    if (last) return { station: s.id, name: `${s.name}, ${s.state}`, km: s.km, fahrenheit: Number(last.v), time: last.t };
+  }
+  return null; // no sensor nearby, or none reporting
 }
 
 async function tides(station, timeZone) {
@@ -113,8 +138,9 @@ export default async function handler(req, res) {
   const timeZone = point.properties.timeZone;
 
   // allSettled: one upstream being down shouldn't blank the whole page.
-  const names = ['alerts', 'forecast', 'marine', 'tides'];
-  const results = await Promise.allSettled([alerts(lat, lon, zone), forecast(point), marine(zone), tides(station, timeZone)]);
+  const names = ['alerts', 'forecast', 'marine', 'tides', 'beach', 'waterTemp'];
+  const results = await Promise.allSettled([alerts(lat, lon, zone), forecast(point), marine(zone), tides(station, timeZone),
+    beach(point, lat, lon), waterTemp(lat, lon)]);
 
   const body = { generated: new Date().toLocaleString('en-US', { timeZone }), timeZone };
   results.forEach((r, i) => {
