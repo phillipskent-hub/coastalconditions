@@ -1,31 +1,11 @@
-// Serverless function: GET /api/conditions
-// Fetches NWS forecast + alerts, the Cape Cod Bay marine forecast, and NOAA
-// tide predictions, and returns them as one JSON payload for the page.
+// Serverless function: GET /api/conditions?lat=..&lon=..&zone=ANZ231&station=8446493
+// Fetches NWS forecast + alerts, the marine forecast for the zone, and NOAA tide
+// predictions, and returns them as one JSON payload for the page.
+// Use /api/locate first to get the zone and station for a place.
+import { getJson, sendJson, query } from '../lib/http.js';
+import { findStation, findZone } from '../lib/geo.js';
 
-const LAT = 41.9584;
-const LON = -70.6673;
-const MARINE_ZONE = 'ANZ231';        // Cape Cod Bay
-const TIDE_STATION = '8446493';      // NOAA CO-OPS "Plymouth, MA" (harmonic reference station)
-const TZ = 'America/New_York';
-
-// NWS requires a User-Agent identifying the app and a contact.
-const UA = 'plymouth-coastal-app (https://github.com/phillipskent-hub/plymouth-coastal)';
-
-async function getJson(url) {
-  const r = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/geo+json, application/json' } });
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText} from ${url}`);
-  return r.json();
-}
-
-async function getText(url) {
-  const r = await fetch(url, { headers: { 'User-Agent': UA } });
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText} from ${url}`);
-  return r.text();
-}
-
-async function forecast() {
-  // /points resolves lat/lon to the forecast office grid; its response gives the forecast URL.
-  const point = await getJson(`https://api.weather.gov/points/${LAT},${LON}`);
+async function forecast(point) {
   const fc = await getJson(point.properties.forecast);
   // First two periods = "today" from the user's point of view (e.g. "This Afternoon" + "Tonight").
   return fc.properties.periods.slice(0, 2).map(p => ({
@@ -38,11 +18,11 @@ async function forecast() {
   }));
 }
 
-async function alerts() {
-  // Land alerts for the Plymouth point plus marine alerts for the bay zone; dedupe by id.
+async function alerts(lat, lon, zone) {
+  // Land alerts for the point (incl. rip current / beach hazards) plus marine alerts for the zone; dedupe by id.
   const [land, marine] = await Promise.all([
-    getJson(`https://api.weather.gov/alerts/active?point=${LAT},${LON}`),
-    getJson(`https://api.weather.gov/alerts/active/zone/${MARINE_ZONE}`),
+    getJson(`https://api.weather.gov/alerts/active?point=${lat},${lon}`),
+    getJson(`https://api.weather.gov/alerts/active/zone/${zone.id}`),
   ]);
   const seen = new Map();
   for (const f of [...land.features, ...marine.features]) {
@@ -52,43 +32,94 @@ async function alerts() {
   return [...seen.values()];
 }
 
-async function marine() {
-  // JSON periods carry wind/seas; the headline ("...SMALL CRAFT ADVISORY...") only appears in the text bulletin.
-  const [json, text] = await Promise.all([
-    getJson(`https://api.weather.gov/zones/forecast/${MARINE_ZONE}/forecast`),
-    getText(`https://tgftp.nws.noaa.gov/data/forecasts/marine/coastal/an/${MARINE_ZONE.toLowerCase()}.txt`).catch(() => ''),
+// UGC lines name the zones a bulletin segment covers, e.g. "ANZ230>232-250-AMZ150-310900-"
+// (">" is a range; the trailing 6 digits are an expiry time, not a zone).
+export function ugcZones(line) {
+  const ids = [];
+  let prefix = '';
+  for (const tok of line.split('-').filter(Boolean)) {
+    const m = tok.match(/^([A-Z]{2}Z)?(\d{3})(?:>(\d{3}))?$/);
+    if (!m) continue;
+    if (m[1]) prefix = m[1];
+    for (let n = +m[2]; n <= +(m[3] || m[2]); n++) ids.push(prefix + String(n).padStart(3, '0'));
+  }
+  return ids;
+}
+
+// Headlines like "...SMALL CRAFT ADVISORY IN EFFECT THROUGH SATURDAY MORNING..." only appear in the
+// text Coastal Waters Forecast (CWF), not the JSON. Find our zone's segment in the office's latest CWF.
+export function cwfHeadlines(text, zoneId) {
+  for (const segment of text.split('$$')) {
+    const ugc = segment.match(/^[A-Z]{2}Z\d{3}[-\d>A-Z\n]*?\d{6}-$/m);
+    if (!ugc || !ugcZones(ugc[0].replace(/\n/g, '')).includes(zoneId)) continue;
+    return [...segment.matchAll(/^\.\.\.([\s\S]+?)\.\.\.\s*$/gm)].map(m => m[1].replace(/\s+/g, ' ').trim());
+  }
+  return [];
+}
+
+async function marine(zone) {
+  const [json, cwf] = await Promise.all([
+    getJson(`https://api.weather.gov/zones/forecast/${zone.id}/forecast`),
+    getJson(`https://api.weather.gov/products/types/CWF/locations/${zone.office}/latest`).catch(() => null),
   ]);
-  const headlines = [...text.matchAll(/^\.\.\.(.+?)\.\.\.\s*$/gm)].map(m => m[1].trim());
   return {
+    zone: zone.id,
+    name: zone.name,
     updated: json.properties.updated,
-    headlines,
+    headlines: cwf ? cwfHeadlines(cwf.productText, zone.id) : [],
     periods: json.properties.periods.slice(0, 2).map(p => ({ name: p.name, text: p.detailedForecast })),
   };
 }
 
-async function tides() {
-  // date=today + time_zone=lst_ldt gives today's hi/lo in the station's local time (EST/EDT).
+async function tides(station, timeZone) {
+  // Today and tomorrow, as explicit dates in the location's time zone: the server runs on UTC, so
+  // "today" would be the wrong date in the evening. Tomorrow matters because Gulf stations often
+  // have only one high and one low a day. lst_ldt = station local time, DST-aware.
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date()); // YYYY-MM-DD
+  const tomorrow = new Date(Date.parse(today + 'T12:00:00Z') + 86400000).toISOString().slice(0, 10);
   const url = 'https://api.tidesandcurrents.noaa.gov/api/prod/datagetter'
-    + `?product=predictions&station=${TIDE_STATION}&date=today&datum=MLLW&time_zone=lst_ldt`
+    + `?product=predictions&station=${station.id}&begin_date=${today.replace(/-/g, '')}&end_date=${tomorrow.replace(/-/g, '')}`
+    + '&datum=MLLW&time_zone=lst_ldt'
     + '&interval=hilo&units=english&format=json&application=plymouth-coastal-app';
   const data = await getJson(url);
   if (data.error) throw new Error(data.error.message);
-  return data.predictions.map(p => ({ time: p.t, feet: Number(p.v), type: p.type === 'H' ? 'High' : 'Low' }));
+  return {
+    station: station.id,
+    name: `${station.name}, ${station.state}`,
+    primary: station.primary,
+    today,
+    // Local "now" in the same "YYYY-MM-DD HH:MM" format as the predictions, so the page can dim past tides.
+    now: new Intl.DateTimeFormat('sv-SE', { timeZone, dateStyle: 'short', timeStyle: 'short' }).format(new Date()),
+    predictions: data.predictions.map(p => ({ time: p.t, feet: Number(p.v), type: p.type === 'H' ? 'High' : 'Low' })),
+  };
 }
 
 export default async function handler(req, res) {
+  const qs = query(req);
+  const lat = +Number(qs.get('lat')).toFixed(3), lon = +Number(qs.get('lon')).toFixed(3);
+  const zone = findZone(qs.get('zone'));
+  const station = findStation(qs.get('station'));
+  // Only accept zones/stations from our own lists, so the query string can't steer our upstream calls.
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !zone || !station) {
+    return sendJson(res, 400, { error: 'Pass lat, lon, zone and station (get them from /api/locate).' });
+  }
+
+  let point;
+  try {
+    point = await getJson(`https://api.weather.gov/points/${lat},${lon}`);
+  } catch (e) {
+    return sendJson(res, 502, { error: String(e.message || e) });
+  }
+  const timeZone = point.properties.timeZone;
+
   // allSettled: one upstream being down shouldn't blank the whole page.
   const names = ['alerts', 'forecast', 'marine', 'tides'];
-  const results = await Promise.allSettled([alerts(), forecast(), marine(), tides()]);
+  const results = await Promise.allSettled([alerts(lat, lon, zone), forecast(point), marine(zone), tides(station, timeZone)]);
 
-  const body = { generated: new Date().toLocaleString('en-US', { timeZone: TZ }), station: TIDE_STATION, zone: MARINE_ZONE };
+  const body = { generated: new Date().toLocaleString('en-US', { timeZone }), timeZone };
   results.forEach((r, i) => {
     body[names[i]] = r.status === 'fulfilled' ? r.value : { error: String(r.reason?.message || r.reason) };
   });
-
-  res.statusCode = 200;
-  res.setHeader('Content-Type', 'application/json');
   // Let Vercel's CDN cache for 10 minutes so we don't hammer NWS/NOAA.
-  res.setHeader('Cache-Control', 's-maxage=600, stale-while-revalidate=300');
-  res.end(JSON.stringify(body));
+  sendJson(res, 200, body, 600);
 }

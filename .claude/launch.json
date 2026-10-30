@@ -4,7 +4,7 @@
     {
       "name": "dev",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["dev-server.js"],
+      "runtimeArgs": ["--watch", "dev-server.js"],
       "port": 3000
     }
   ]

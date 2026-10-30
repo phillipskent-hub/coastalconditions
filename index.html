@@ -3,28 +3,56 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Plymouth Coastal Conditions</title>
+  <title>Coastal Conditions</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 720px; margin: 1rem auto; padding: 0 1rem; line-height: 1.4; }
     .alert { background: #fdd; border: 1px solid #c00; padding: .5rem; margin-bottom: .5rem; }
     .err { color: #c00; }
     table { border-collapse: collapse; }
     td, th { padding: .2rem .8rem .2rem 0; text-align: left; }
-    small { color: #666; }
+    small, footer { color: #666; }
+    form { display: flex; flex-wrap: wrap; gap: .4rem; }
+    form input { flex: 1 1 14rem; padding: .3rem; }
+    select { max-width: 100%; }
+    label { display: block; margin: .3rem 0; }
+    [hidden] { display: none; }
   </style>
 </head>
 <body>
-  <h1>Plymouth, MA</h1>
-  <div id="alerts"></div>
-  <h2>Forecast</h2><div id="forecast">Loading…</div>
-  <h2>Cape Cod Bay (ANZ231)</h2><div id="marine">Loading…</div>
-  <h2>Tides today <small>(Plymouth 8446493, ft MLLW)</small></h2><div id="tides">Loading…</div>
-  <p><small id="generated"></small></p>
+  <form id="search">
+    <input id="q" type="search" placeholder="Beach or town, e.g. Nauset Beach" aria-label="Beach or town">
+    <button>Search</button>
+    <button type="button" id="here">Use my location</button>
+  </form>
+  <p id="status"></p>
+
+  <div id="main" hidden>
+    <h1 id="place"></h1>
+    <p id="alternatives"></p>
+    <div id="alerts"></div>
+    <h2>Forecast</h2><div id="forecast"></div>
+    <h2>Tides</h2>
+    <label>Station <select id="station"></select></label>
+    <div id="tides"></div>
+    <h2>Nearshore waters</h2>
+    <label>Marine zone <select id="zone"></select></label>
+    <div id="marine"></div>
+    <p><small id="generated"></small></p>
+  </div>
+
+  <footer><small>
+    Data: NOAA National Weather Service and NOAA CO-OPS tide predictions. Place search © OpenStreetMap contributors.
+    Not for navigation.
+  </small></footer>
 
   <script>
     const $ = id => document.getElementById(id);
     const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const failed = x => x && x.error ? `<p class="err">Unavailable: ${esc(x.error)}</p>` : null;
+    const status = msg => { $('status').textContent = msg || ''; };
+
+    let place = null;   // last /api/locate result
+    let choice = {};    // { zone, station } the user is currently viewing
 
     // "2026-10-30 15:07" (already local time from NOAA) -> "3:07 PM"
     function clock(t) {
@@ -34,25 +62,128 @@
       return `${h}:${String(m).padStart(2, '0')} ${ap}`;
     }
 
-    fetch('/api/conditions')
-      .then(r => r.json())
-      .then(d => {
-        $('alerts').innerHTML = failed(d.alerts) ?? d.alerts.map(a =>
-          `<div class="alert"><strong>${esc(a.event)}</strong> — ${esc(a.headline)}</div>`).join('');
+    // Today's and tomorrow's tides; ones already past are dimmed. Times are compared as
+    // "YYYY-MM-DD HH:MM" strings in the location's own time zone, so the viewer's zone doesn't matter.
+    function renderTides(t) {
+      let rows = '', day = null;
+      for (const p of t.predictions) {
+        const d = p.time.slice(0, 10);
+        if (d !== day) {
+          day = d;
+          rows += `<tr><th colspan="3">${d === t.today ? 'Today' : 'Tomorrow'}</th></tr>`;
+        }
+        const past = p.time < t.now ? ' style="color:#999"' : '';
+        rows += `<tr${past}><td>${p.type}</td><td>${clock(p.time)}</td><td>${p.feet.toFixed(1)} ft</td></tr>`;
+      }
+      return `<table>${rows}</table><small>Feet above mean lower low water (MLLW).</small>`;
+    }
 
-        $('forecast').innerHTML = failed(d.forecast) ?? d.forecast.map(p =>
-          `<p><strong>${esc(p.name)}:</strong> ${esc(p.temperature)}°${esc(p.unit)}, ${esc(p.short)}. Wind ${esc(p.wind)}.<br>${esc(p.detailed)}</p>`).join('');
+    async function getJson(url) {
+      const r = await fetch(url);
+      const body = await r.json();
+      if (body.error) throw new Error(body.error);
+      return body;
+    }
 
-        $('marine').innerHTML = failed(d.marine) ??
-          d.marine.headlines.map(h => `<p><strong>${esc(h)}</strong></p>`).join('') +
-          d.marine.periods.map(p => `<p><strong>${esc(p.name)}:</strong> ${esc(p.text)}</p>`).join('');
+    // localStorage can throw (private windows, blocked storage); it's only a convenience.
+    const store = {
+      get() { try { return JSON.parse(localStorage.getItem('place')); } catch { return null; } },
+      set(v) { try { localStorage.setItem('place', JSON.stringify(v)); } catch {} },
+    };
 
-        $('tides').innerHTML = failed(d.tides) ?? '<table>' + d.tides.map(t =>
-          `<tr><td>${t.type}</td><td>${clock(t.time)}</td><td>${t.feet.toFixed(1)} ft</td></tr>`).join('') + '</table>';
+    async function locate(params, prefer = {}) {
+      status('Finding that spot…');
+      try {
+        place = await getJson('/api/locate?' + new URLSearchParams(params));
+      } catch (e) {
+        return status(e.message);
+      }
+      // Keep a previously chosen zone/station if it's still one of the options.
+      choice = {
+        zone: place.zones.some(z => z.id === prefer.zone) ? prefer.zone : place.zones[0]?.id,
+        station: place.stations.some(s => s.id === prefer.station) ? prefer.station : place.stations[0].id,
+      };
+      renderPlace();
+      loadConditions();
+    }
 
-        $('generated').textContent = `Fetched ${d.generated}`;
-      })
-      .catch(e => { $('forecast').innerHTML = `<p class="err">Failed to load: ${esc(e.message)}</p>`; });
+    function renderPlace() {
+      $('main').hidden = false;
+      $('place').textContent = place.name;
+      $('alternatives').innerHTML = place.alternatives?.length
+        ? 'Not the right spot? ' + place.alternatives.map((a, i) => `<a href="#" data-alt="${i}">${esc(a.name)}</a>`).join(' · ')
+        : '';
+      $('station').innerHTML = place.stations.map(s =>
+        `<option value="${s.id}">${esc(s.name)}, ${s.state} (${s.km} km${s.primary ? '' : ', estimated from nearby station'})</option>`).join('');
+      $('zone').innerHTML = place.zones.map(z =>
+        `<option value="${z.id}">${esc(z.name)} (${z.id}${z.km ? `, ${z.km} km` : ''})</option>`).join('');
+      $('station').value = choice.station;
+      $('zone').value = choice.zone;
+    }
+
+    // Put the location in the address bar (bookmarkable/shareable) and remember it for next visit.
+    function remember() {
+      const p = { lat: place.lat, lon: place.lon, name: place.name, zone: choice.zone, station: choice.station };
+      history.replaceState(null, '', '?' + new URLSearchParams(p));
+      store.set(p);
+    }
+
+    async function loadConditions() {
+      remember();
+      status('Loading conditions…');
+      let d;
+      try {
+        d = await getJson('/api/conditions?' + new URLSearchParams({ lat: place.lat, lon: place.lon, zone: choice.zone, station: choice.station }));
+      } catch (e) {
+        return status('Failed to load: ' + e.message);
+      }
+      status('');
+
+      $('alerts').innerHTML = failed(d.alerts) ?? d.alerts.map(a =>
+        `<div class="alert"><strong>${esc(a.event)}</strong> — ${esc(a.headline)}</div>`).join('');
+
+      $('forecast').innerHTML = failed(d.forecast) ?? d.forecast.map(p =>
+        `<p><strong>${esc(p.name)}:</strong> ${esc(p.temperature)}°${esc(p.unit)}, ${esc(p.short)}. Wind ${esc(p.wind)}.<br>${esc(p.detailed)}</p>`).join('');
+
+      $('tides').innerHTML = failed(d.tides) ?? renderTides(d.tides);
+
+      $('marine').innerHTML = failed(d.marine) ??
+        d.marine.headlines.map(h => `<p><strong>${esc(h)}</strong></p>`).join('') +
+        d.marine.periods.map(p => `<p><strong>${esc(p.name)}:</strong> ${esc(p.text)}</p>`).join('');
+
+      $('generated').textContent = `Fetched ${d.generated}`;
+    }
+
+    $('search').addEventListener('submit', e => {
+      e.preventDefault();
+      const q = $('q').value.trim();
+      if (q) locate({ q });
+    });
+
+    $('here').addEventListener('click', () => {
+      if (!navigator.geolocation) return status('This browser can’t share its location.');
+      status('Getting your location…');
+      navigator.geolocation.getCurrentPosition(
+        pos => locate({ lat: pos.coords.latitude.toFixed(3), lon: pos.coords.longitude.toFixed(3) }),
+        err => status('Couldn’t get your location: ' + err.message),
+        { timeout: 15000 });
+    });
+
+    $('alternatives').addEventListener('click', e => {
+      const a = place.alternatives[e.target.dataset.alt];
+      if (!a) return;
+      e.preventDefault();
+      locate({ lat: a.lat, lon: a.lon, name: a.name });
+    });
+
+    $('station').addEventListener('change', e => { choice.station = e.target.value; loadConditions(); });
+    $('zone').addEventListener('change', e => { choice.zone = e.target.value; loadConditions(); });
+
+    // Start from the address bar (shared link) or the last spot this browser looked at.
+    const fromUrl = Object.fromEntries(new URLSearchParams(location.search));
+    const start = fromUrl.lat ? fromUrl : store.get();
+    if (start?.lat) locate({ lat: start.lat, lon: start.lon, ...(start.name && { name: start.name }) }, start);
+    else status('Search for a beach or town on the lower-48 ocean coast, or use your location.');
   </script>
 </body>
 </html>

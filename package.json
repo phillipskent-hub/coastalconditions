@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Personal coastal conditions page for Plymouth, MA",
   "scripts": {
-    "dev": "node dev-server.js"
+    "dev": "node --watch dev-server.js",
+    "build-data": "node scripts/build-data.js"
   },
   "engines": {
     "node": ">=20"
