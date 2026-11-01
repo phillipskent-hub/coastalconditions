@@ -152,6 +152,36 @@
     .marine-card { background: var(--muted); border-radius: .75rem; padding: 1rem; }
     .marine-card .label { color: var(--primary); }
 
+    .moon-tag { display: inline-block; margin-top: .75rem; border-radius: 999px; padding: .25rem .75rem; font-size: .875rem;
+      background: color-mix(in oklch, var(--deep-foreground) 12%, transparent); }
+    .link-pill { border-radius: 999px; border: 1px solid var(--input); padding: .375rem .75rem; font-size: .875rem;
+      color: var(--primary); text-decoration: none; font-weight: 600; }
+    .link-pill:hover { background: var(--secondary); }
+    .right-col { display: flex; flex-direction: column; gap: 1.25rem; }
+
+    /* Hourly strip: one column per hour, scrolls sideways */
+    .hours { display: flex; overflow-x: auto; padding-bottom: .5rem; scroll-snap-type: x proximity; }
+    .hour { flex: 0 0 3.6rem; text-align: center; scroll-snap-align: start; border-left: 1px solid transparent; }
+    .hour.newday { border-left-color: var(--border); }
+    .hour .day { height: 1rem; font-size: .7rem; font-weight: 700; color: var(--primary); text-transform: uppercase; }
+    .hour .hr { font-size: .75rem; color: var(--muted-foreground); }
+    .hour .t { font-weight: 600; margin: .1rem 0 .25rem; }
+    .hour svg { display: block; margin: 0 auto; }
+    .hour .w { font-size: .8rem; font-weight: 600; line-height: 1.1; margin-top: .15rem; }
+    .hour .g { font-size: .7rem; color: var(--muted-foreground); min-height: .9rem; }
+    .rain { height: 2.5rem; margin: .35rem auto .1rem; width: 1.1rem; display: flex; align-items: flex-end;
+      background: var(--muted); border-radius: .25rem; overflow: hidden; }
+    .rain div { width: 100%; background: var(--water); }
+    .hour .p, .hour .h { font-size: .7rem; color: var(--muted-foreground); }
+    .hour .p.wet { color: var(--primary); font-weight: 700; }
+    .legend { margin-top: .5rem; }
+
+    .sky { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem 1rem; }
+    .sky .big { font-family: var(--font-display); font-size: 1.25rem; }
+    .moon-row { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); display: flex; gap: .75rem; align-items: center; }
+    .moon-row .emoji { font-size: 2.25rem; line-height: 1; }
+    .spring { margin-top: .75rem; border-radius: .75rem; background: var(--secondary); padding: .6rem .8rem; font-size: .875rem; }
+
     .skeleton > div { height: 1rem; border-radius: .25rem; background: var(--muted); animation: pulse 1.6s ease-in-out infinite; }
     .skeleton > div + div { margin-top: .5rem; width: 50%; }
     .skeleton > div:first-child { width: 66%; }
@@ -180,6 +210,7 @@
       <div id="placeHead" class="hero" hidden>
         <h1 id="placeName" class="display"></h1>
         <p id="placeSub" class="sub"></p>
+        <span id="moonTag" class="moon-tag" hidden></span>
         <p id="alternatives" class="small"></p>
       </div>
       <p id="status" class="small" aria-live="polite"></p>
@@ -199,15 +230,29 @@
         <div id="tides"></div>
       </section>
 
+      <section class="card section">
+        <div class="section-head">
+          <h2 class="display">Next 48 hours</h2>
+          <a id="radar" class="link-pill" target="_blank" rel="noopener" hidden>Live radar ↗</a>
+        </div>
+        <div id="hourly"></div>
+      </section>
+
       <div class="two-col">
         <section class="card section">
           <div class="section-head"><h2 class="display">At the beach</h2></div>
           <div id="beach"></div>
         </section>
-        <section class="card section">
-          <div class="section-head"><h2 class="display">Forecast</h2></div>
-          <div id="forecast"></div>
-        </section>
+        <div class="right-col">
+          <section class="card section">
+            <div class="section-head"><h2 class="display">Forecast</h2></div>
+            <div id="forecast"></div>
+          </section>
+          <section class="card section">
+            <div class="section-head"><h2 class="display">Sun &amp; moon</h2></div>
+            <div id="astro"></div>
+          </section>
+        </div>
       </div>
 
       <section class="card section">
@@ -220,7 +265,8 @@
     </div>
 
     <footer class="tiny muted">
-      Data: NOAA National Weather Service and NOAA CO-OPS tide predictions. Place search © OpenStreetMap contributors.
+      Data: NOAA National Weather Service, NOAA CO-OPS tide predictions, US Naval Observatory sun and moon data.
+      Place search © OpenStreetMap contributors.
       Not for navigation.
     </footer>
   </main>
@@ -266,6 +312,27 @@
       get() { try { return JSON.parse(localStorage.getItem('place')); } catch { return null; } },
       set(v) { try { localStorage.setItem('place', JSON.stringify(v)); } catch {} },
     };
+
+    // "17:05" -> "5:05 PM"
+    const hm = t => t ? clock('x ' + t) : '—';
+    // "2026-11-09" -> "Mon, Nov 9" (UTC so the viewer's own zone can't shift the day)
+    const dayName = (ymd, opts = { weekday: 'short', month: 'short', day: 'numeric' }) =>
+      new Date(ymd + 'T12:00:00Z').toLocaleDateString('en-US', { ...opts, timeZone: 'UTC' });
+
+    const MOON_EMOJI = { 'New Moon': '🌑', 'Waxing Crescent': '🌒', 'First Quarter': '🌓', 'Waxing Gibbous': '🌔',
+      'Full Moon': '🌕', 'Waning Gibbous': '🌖', 'Last Quarter': '🌗', 'Waning Crescent': '🌘' };
+
+    // 16-point compass -> degrees the wind blows FROM.
+    const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+    const degrees = dir => { const i = COMPASS.indexOf(dir); return i < 0 ? null : i * 22.5; };
+
+    // Arrow pointing where the wind is blowing TO (a NE wind points southwest).
+    function windArrow(dir) {
+      const d = degrees(dir);
+      if (d === null) return '<svg width="22" height="22"></svg>';
+      return `<svg width="22" height="22" viewBox="0 0 24 24" aria-label="wind from ${esc(dir)}" role="img">
+        <g transform="rotate(${d + 180} 12 12)"><path d="M12 3 L18 15 L12 12 L6 15 Z" fill="var(--primary)"/></g></svg>`;
+    }
 
     // ---------- tide curve ----------
     // Cosine-interpolated curve through the hi/lo points, with a dashed "now" line.
@@ -317,6 +384,9 @@
       const [first, ...rest] = place.name.split(',');
       $('placeName').textContent = first;
       $('placeSub').textContent = rest.join(',').trim();
+      const astro = cond?.astro && !cond.astro.error ? cond.astro : null;
+      $('moonTag').hidden = !astro;
+      if (astro) $('moonTag').textContent = moonTag(astro);
       $('alternatives').innerHTML = place.alternatives?.length
         ? 'Not quite? ' + place.alternatives.map((a, i) => `<button type="button" data-alt="${i}">${esc(a.name)}</button>`).join(' · ')
         : '';
@@ -362,12 +432,13 @@
         sub: w ? `at ${esc(w.name)} · ${w.km} km` : fcWater ? 'NWS surf forecast' : cond ? 'No sensor nearby' : '',
       });
 
-      // Air: the first forecast period.
+      // Air: the first forecast period, plus humidity for the current hour.
       const now0 = cond && ok(cond.forecast) ? cond.forecast[0] : null;
+      const hum = cond && ok(cond.hourly) ? cond.hourly[0]?.humidity : null;
       cards.push({
         label: now0?.name ?? 'Air',
         value: !cond ? loading : now0 ? `${now0.temperature}°${esc(now0.unit)}` : '—',
-        sub: now0 ? `${esc(now0.short)} · ${esc(now0.wind)}` : '',
+        sub: now0 ? `${esc(now0.short)} · ${esc(now0.wind)}${hum != null ? ` · ${hum}% humidity` : ''}` : '',
       });
 
       $('glance').innerHTML = cards.map(c => `<div class="card"><p class="label">${c.label}</p>
@@ -416,6 +487,56 @@
         <p class="tiny muted">Wind ${esc(p.wind)}</p></li>`).join('') + '</ul>';
     }
 
+    // One column per hour: time, temp, wind arrow + speed (gusts when notably higher), rain chance bar, humidity.
+    function renderHourly(hours) {
+      let lastDay = null;
+      const cols = hours.map((h, i) => {
+        const [day, time] = h.time.split(' ');
+        const hour = +time.slice(0, 2);
+        const newDay = day !== lastDay;
+        lastDay = day;
+        const label = newDay ? (i === 0 ? 'Now' : dayName(day, { weekday: 'short' })) : '';
+        const hr = `${hour % 12 || 12}${hour < 12 ? 'a' : 'p'}`;
+        // NWS forecasts a gust value every hour; only show ones that matter (15+ mph and well above the wind).
+        const gust = h.gust != null && h.gust >= 15 && h.gust >= h.wind + 8 ? `G${h.gust}` : '';
+        return `<div class="hour${newDay && i ? ' newday' : ''}" title="${esc(h.short)}">
+          <div class="day">${label}</div><div class="hr">${hr}</div><div class="t">${h.temp}°</div>
+          ${windArrow(h.dir)}<div class="w">${esc(h.dir)} ${h.wind}</div><div class="g">${gust}</div>
+          <div class="rain"><div style="height:${h.pop}%"></div></div>
+          <div class="p${h.pop >= 30 ? ' wet' : ''}">${h.pop}%</div>
+          <div class="h">${h.humidity != null ? h.humidity + '%' : ''}</div></div>`;
+      }).join('');
+      return `<div class="hours" tabindex="0" aria-label="Hourly forecast, scrolls sideways">${cols}</div>
+        <p class="legend tiny muted">Wind in mph from the direction shown (G = gusts) · bar and % = chance of rain ·
+          bottom row = humidity · scroll sideways for more.</p>`;
+    }
+
+    // Sun and moon times, phase, next full/new moon, and a spring-tide note around full/new moons.
+    function renderAstro(a) {
+      let html = `<div class="sky">
+        <div><p class="label">Sunrise</p><p class="big">${hm(a.sunrise)}</p><p class="tiny muted">First light ${hm(a.dawn)}</p></div>
+        <div><p class="label">Sunset</p><p class="big">${hm(a.sunset)}</p><p class="tiny muted">Last light ${hm(a.dusk)}</p></div>
+        <div><p class="label">Moonrise</p><p class="big">${hm(a.moonrise)}</p></div>
+        <div><p class="label">Moonset</p><p class="big">${hm(a.moonset)}</p></div>
+      </div>
+      <div class="moon-row"><span class="emoji" aria-hidden="true">${MOON_EMOJI[a.phase] || '🌙'}</span>
+        <div><p style="font-weight:600">${esc(a.phase)} · ${esc(a.illumination)} lit</p>
+          <p class="small muted">${a.nextFull ? `Full moon ${moonWhen(a.nextFull, a.today)}` : ''}${a.nextFull && a.nextNew ? ' · ' : ''}${a.nextNew ? `New moon ${moonWhen(a.nextNew, a.today)}` : ''}</p></div></div>`;
+      if (a.springTides) {
+        html += `<p class="spring"><strong>Spring tides:</strong> around the ${a.springTides.phase.toLowerCase()} (${dayName(a.springTides.date)}),
+          so expect higher highs and lower lows than usual for the next few days.</p>`;
+      }
+      return html + '<p class="tiny muted" style="margin-top:.75rem">A dash means the moon doesn’t rise or set that day. US Naval Observatory.</p>';
+    }
+    const moonWhen = (p, today) => p.date === today ? `tonight (${hm(p.time)})` : dayName(p.date);
+
+    // Header tag: a full moon within a week gets called out; otherwise today's phase.
+    function moonTag(a) {
+      const full = a.nextFull && a.nextFull.date >= a.today && (Date.parse(a.nextFull.date) - Date.parse(a.today)) / 864e5 <= 7;
+      if (full) return `🌕 Full moon ${a.nextFull.date === a.today ? 'tonight' : dayName(a.nextFull.date, { weekday: 'long' })}`;
+      return `${MOON_EMOJI[a.phase] || '🌙'} ${a.phase}`;
+    }
+
     function renderMarine(m) {
       return m.headlines.map(h => `<span class="headline-pill">${esc(h)}</span>`).join('') +
         '<div class="marine-grid">' + m.periods.map(p => `<div class="marine-card"><p class="label">${esc(p.name)}</p>
@@ -428,6 +549,10 @@
       $('tides').innerHTML = !cond ? skeleton : failed(cond.tides) ?? renderTides(cond.tides);
       $('beach').innerHTML = !cond ? skeleton : failed(cond.beach) ?? renderBeach(cond.beach);
       $('forecast').innerHTML = !cond ? skeleton : failed(cond.forecast) ?? renderForecast(cond.forecast);
+      $('hourly').innerHTML = !cond ? skeleton : failed(cond.hourly) ?? renderHourly(cond.hourly);
+      $('astro').innerHTML = !cond ? skeleton : failed(cond.astro) ?? renderAstro(cond.astro);
+      $('radar').hidden = !cond?.radar;
+      if (cond?.radar) $('radar').href = cond.radar;
       $('marine').innerHTML = !cond ? skeleton : failed(cond.marine) ?? renderMarine(cond.marine);
     }
 

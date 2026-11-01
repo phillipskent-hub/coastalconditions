@@ -1,15 +1,19 @@
 // Serverless function: GET /api/conditions?lat=..&lon=..&zone=ANZ231&station=8446493
-// Fetches NWS forecast + alerts, the surf zone forecast (rip currents), the marine forecast
-// for the zone, NOAA tide predictions and measured water temperature, and returns them as
-// one JSON payload for the page.
+// Fetches NWS forecast (daily and hourly) + alerts, the surf zone forecast (rip currents), the
+// marine forecast for the zone, NOAA tide predictions, measured water temperature, and sun/moon
+// times from the US Naval Observatory, and returns them as one JSON payload for the page.
 // Use /api/locate first to get the zone and station for a place.
 import { getJson, sendJson, query } from '../lib/http.js';
 import { findStation, findZone, nearestTempStations } from '../lib/geo.js';
 import { segmentFor, headlines, surfZone } from '../lib/nws-text.js';
+import { localDate, localDateTime, utcOffsetHours, addDays, daysBetween, gridValueAt } from '../lib/time.js';
+
+const HOURS = 48;
+const TO_MPH = { 'wmoUnit:km_h-1': 0.621371, 'wmoUnit:m_s-1': 2.23694 };
 
 const SRF_MAX_AGE_HOURS = 36;
 // Surf zone fields already covered elsewhere on the page.
-const SRF_SKIP = /^(Tides|Astronomical Tides|Weather|High Temperature|Winds?)$/;
+const SRF_SKIP = /^(Tides|Astronomical Tides|Weather|High Temperature|Winds?|Sunrise|Sunset|Sunrise\/Sunset Times)$/;
 
 async function forecast(point) {
   const fc = await getJson(point.properties.forecast);
@@ -22,6 +26,66 @@ async function forecast(point) {
     short: p.shortForecast,
     detailed: p.detailedForecast,
   }));
+}
+
+// Next 48 hours: wind, rain chance, humidity. Gusts aren't in the hourly forecast, only in the
+// raw gridpoint data (in km/h, as time ranges), so they're looked up per hour from there.
+async function hourly(point) {
+  const [fc, grid] = await Promise.all([
+    getJson(point.properties.forecastHourly),
+    getJson(point.properties.forecastGridData).catch(() => null),
+  ]);
+  const gusts = grid?.properties.windGust;
+  const factor = TO_MPH[gusts?.uom] ?? 1;
+  return fc.properties.periods.slice(0, HOURS).map(p => {
+    const gust = gusts ? gridValueAt(gusts.values, Date.parse(p.startTime)) : null;
+    return {
+      time: p.startTime.slice(0, 16).replace('T', ' '), // already in the location's local time
+      temp: p.temperature,
+      wind: parseInt(p.windSpeed, 10) || 0,
+      gust: gust == null ? null : Math.round(gust * factor),
+      dir: p.windDirection,
+      pop: p.probabilityOfPrecipitation?.value ?? 0,
+      humidity: p.relativeHumidity?.value ?? null,
+      short: p.shortForecast,
+    };
+  });
+}
+
+// Sun and moon times plus moon phases, from the US Naval Observatory. Their API takes a fixed
+// UTC offset, so pass today's offset for the location (handles DST) with dst=false.
+// Full and new moons bring spring tides (bigger range), usually peaking a day or two after.
+async function astro(lat, lon, timeZone) {
+  const today = localDate(timeZone);
+  const tz = utcOffsetHours(timeZone);
+  const [day, phases] = await Promise.all([
+    getJson(`https://aa.usno.navy.mil/api/rstt/oneday?date=${today}&coords=${lat},${lon}&tz=${tz}&dst=false`),
+    getJson(`https://aa.usno.navy.mil/api/moon/phases/date?date=${addDays(today, -8)}&nump=6`),
+  ]);
+  const d = day.properties.data;
+  const at = (list, phen) => list?.find(x => x.phen === phen)?.time ?? null;
+  // Phase times are UT; convert to the location's local date and time.
+  const local = phases.phasedata.map(p => {
+    const [hh, mm] = p.time.split(':').map(Number);
+    const [date, time] = localDateTime(timeZone, new Date(Date.UTC(p.year, p.month - 1, p.day, hh, mm))).split(' ');
+    return { phase: p.phase, date, time };
+  });
+  const next = name => local.find(p => p.phase === name && p.date >= today) ?? null;
+  const spring = local.find(p => /^(Full|New) Moon$/.test(p.phase) && daysBetween(p.date, today) >= -2 && daysBetween(p.date, today) <= 3);
+  return {
+    today,
+    sunrise: at(d.sundata, 'Rise'),
+    sunset: at(d.sundata, 'Set'),
+    dawn: at(d.sundata, 'Begin Civil Twilight'),
+    dusk: at(d.sundata, 'End Civil Twilight'),
+    moonrise: at(d.moondata, 'Rise'),
+    moonset: at(d.moondata, 'Set'),
+    phase: d.curphase,
+    illumination: d.fracillum,
+    nextFull: next('Full Moon'),
+    nextNew: next('New Moon'),
+    springTides: spring ? { phase: spring.phase, date: spring.date } : null,
+  };
 }
 
 async function alerts(lat, lon, zone) {
@@ -100,8 +164,8 @@ async function tides(station, timeZone) {
   // Today and tomorrow, as explicit dates in the location's time zone: the server runs on UTC, so
   // "today" would be the wrong date in the evening. Tomorrow matters because Gulf stations often
   // have only one high and one low a day. lst_ldt = station local time, DST-aware.
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone }).format(new Date()); // YYYY-MM-DD
-  const tomorrow = new Date(Date.parse(today + 'T12:00:00Z') + 86400000).toISOString().slice(0, 10);
+  const today = localDate(timeZone);
+  const tomorrow = addDays(today, 1);
   const url = 'https://api.tidesandcurrents.noaa.gov/api/prod/datagetter'
     + `?product=predictions&station=${station.id}&begin_date=${today.replace(/-/g, '')}&end_date=${tomorrow.replace(/-/g, '')}`
     + '&datum=MLLW&time_zone=lst_ldt'
@@ -114,7 +178,7 @@ async function tides(station, timeZone) {
     primary: station.primary,
     today,
     // Local "now" in the same "YYYY-MM-DD HH:MM" format as the predictions, so the page can dim past tides.
-    now: new Intl.DateTimeFormat('sv-SE', { timeZone, dateStyle: 'short', timeStyle: 'short' }).format(new Date()),
+    now: localDateTime(timeZone),
     predictions: data.predictions.map(p => ({ time: p.t, feet: Number(p.v), type: p.type === 'H' ? 'High' : 'Low' })),
   };
 }
@@ -138,11 +202,17 @@ export default async function handler(req, res) {
   const timeZone = point.properties.timeZone;
 
   // allSettled: one upstream being down shouldn't blank the whole page.
-  const names = ['alerts', 'forecast', 'marine', 'tides', 'beach', 'waterTemp'];
+  const names = ['alerts', 'forecast', 'marine', 'tides', 'beach', 'waterTemp', 'hourly', 'astro'];
   const results = await Promise.allSettled([alerts(lat, lon, zone), forecast(point), marine(zone), tides(station, timeZone),
-    beach(point, lat, lon), waterTemp(lat, lon)]);
+    beach(point, lat, lon), waterTemp(lat, lon), hourly(point), astro(lat, lon, timeZone)]);
 
-  const body = { generated: new Date().toLocaleString('en-US', { timeZone }), timeZone };
+  const radar = point.properties.radarStation;
+  const body = {
+    generated: new Date().toLocaleString('en-US', { timeZone }),
+    timeZone,
+    // NWS's own radar page for the nearest radar site (a link, not embedded).
+    radar: radar ? `https://radar.weather.gov/station/${radar}/standard` : null,
+  };
   results.forEach((r, i) => {
     body[names[i]] = r.status === 'fulfilled' ? r.value : { error: String(r.reason?.message || r.reason) };
   });

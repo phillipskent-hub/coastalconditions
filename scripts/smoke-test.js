@@ -23,7 +23,9 @@ for (const [label, lat, lon] of places) {
   const [zone, station] = [loc.zones[0], loc.stations[0]];
   const params = new URLSearchParams({ lat: loc.lat, lon: loc.lon, zone: zone?.id, station: station.id });
   const c = await getJson(`${base}/api/conditions?${params}`);
-  const errs = ['alerts', 'forecast', 'marine', 'tides', 'beach'].filter(k => !c[k] || c[k].error);
+  const errs = ['alerts', 'forecast', 'marine', 'tides', 'beach', 'hourly', 'astro'].filter(k => !c[k] || c[k].error);
+  if (c.hourly?.length < 24) errs.push('hourly');
+  if (!c.astro?.sunrise || !c.radar) errs.push('astro');
   const rip = c.beach?.periods?.[0]?.fields.find(f => f.label === 'Rip Current Risk');
   if (errs.length || c.error) failures++;
   console.log([
@@ -33,6 +35,7 @@ for (const [label, lat, lon] of places) {
     `alerts:${c.alerts?.length ?? '-'} tides:${c.tides?.predictions?.length ?? '-'} headlines:${c.marine?.headlines?.length ?? '-'}`,
     `surf:${c.beach?.available ? c.beach.office + (rip ? ' rip ' + rip.parts.map(p => p.text).join('/') : ' no-rip') : '-'}`.padEnd(22),
     `water:${c.waterTemp ? c.waterTemp.fahrenheit + 'F@' + c.waterTemp.km + 'km' : '-'}`.padEnd(17),
+    `hours:${c.hourly?.length ?? '-'} sun:${c.astro?.sunrise ?? '-'}-${c.astro?.sunset ?? '-'}`,
     errs.length ? 'errors: ' + errs.map(k => `${k}=${c[k]?.error}`).join('; ') : c.error || '',
   ].join(' | '));
 }
