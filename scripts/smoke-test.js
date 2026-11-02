@@ -1,6 +1,6 @@
 // Runs /api/locate and /api/conditions for a set of coastal spots and prints a one-line summary each.
 //   node scripts/smoke-test.js                      (against the local dev server)
-//   node scripts/smoke-test.js https://plymouth-coastal.vercel.app
+//   node scripts/smoke-test.js https://coastalconditions.app
 //
 // Spots are fixed on-land coordinates, so this doesn't call OpenStreetMap's search (their policy
 // is max 1 request/second and no bulk use). One name search at the end checks search still works.

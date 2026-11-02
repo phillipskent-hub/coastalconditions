@@ -1,4 +1,6 @@
-# plymouth-coastal
+# Coastal Conditions
+
+Live at https://coastalconditions.app (the old plymouth-coastal.vercel.app address redirects there, see `vercel.json`).
 
 Shore conditions for beach-goers and anglers anywhere on the lower-48 US ocean coasts:
 active alerts, rip current risk and surf (NWS Surf Zone Forecast, where the local office issues one),
