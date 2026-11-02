@@ -1,9 +1,9 @@
 {
   "redirects": [
     {
-      "source": "/:path*",
+      "source": "/(.*)",
       "has": [{ "type": "host", "value": "plymouth-coastal.vercel.app" }],
-      "destination": "https://coastalconditions.app/:path*",
+      "destination": "https://coastalconditions.app/$1",
       "permanent": true
     }
   ]
