@@ -8,7 +8,7 @@
 // data/water-temp-stations.js – CO-OPS stations with a water temperature sensor, same coasts
 import { writeFile, mkdir } from 'node:fs/promises';
 
-const UA = 'plymouth-coastal-app (https://github.com/phillipskent-hub/plymouth-coastal)';
+const UA = 'coastalconditions-app (https://coastalconditions.app)';
 const LOWER48_COASTAL = new Set(['ME', 'NH', 'MA', 'RI', 'CT', 'NY', 'NJ', 'PA', 'DE', 'MD', 'DC', 'VA', 'NC', 'SC',
   'GA', 'FL', 'AL', 'MS', 'LA', 'TX', 'CA', 'OR', 'WA']);
 const ZONE_PREFIXES = ['ANZ', 'AMZ', 'GMZ', 'PZZ'];

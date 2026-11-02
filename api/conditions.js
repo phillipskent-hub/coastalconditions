@@ -152,7 +152,7 @@ async function waterTemp(lat, lon) {
   for (const s of nearestTempStations(lat, lon)) {
     const url = 'https://api.tidesandcurrents.noaa.gov/api/prod/datagetter'
       + `?product=water_temperature&station=${s.id}&range=3&units=english&time_zone=lst_ldt&format=json`
-      + '&application=plymouth-coastal-app';
+      + '&application=coastalconditions-app';
     const data = await getJson(url).catch(() => null);
     const last = data?.data?.filter(d => d.v !== '').at(-1);
     if (last) return { station: s.id, name: `${s.name}, ${s.state}`, km: s.km, fahrenheit: Number(last.v), time: last.t };
@@ -169,7 +169,7 @@ async function tides(station, timeZone) {
   const url = 'https://api.tidesandcurrents.noaa.gov/api/prod/datagetter'
     + `?product=predictions&station=${station.id}&begin_date=${today.replace(/-/g, '')}&end_date=${tomorrow.replace(/-/g, '')}`
     + '&datum=MLLW&time_zone=lst_ldt'
-    + '&interval=hilo&units=english&format=json&application=plymouth-coastal-app';
+    + '&interval=hilo&units=english&format=json&application=coastalconditions-app';
   const data = await getJson(url);
   if (data.error) throw new Error(data.error.message);
   return {
