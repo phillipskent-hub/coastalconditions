@@ -8,6 +8,15 @@
   <meta property="og:title" content="Coastal Conditions">
   <meta property="og:description" content="Your daily check on tides, surf, rip currents and nearshore waters, straight from NOAA.">
   <meta property="og:type" content="website">
+  <!-- Installable app: manifest + icons; iOS reads the apple-* tags instead of the manifest. -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/favicon-32.png" type="image/png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="theme-color" content="#12304d">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Coastal">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Manrope:wght@400;500;600;700&display=swap">
@@ -188,6 +197,15 @@
     .value .skeleton-box { height: 2rem; width: 5rem; border-radius: .25rem; background: var(--muted); animation: pulse 1.6s ease-in-out infinite; }
     @keyframes pulse { 50% { opacity: .5; } }
     footer { padding-top: 1rem; text-align: center; }
+    /* Installed on iPhone the header runs under the status bar; pad by the safe-area inset. */
+    .sea .wrap { padding-top: max(1.5rem, calc(env(safe-area-inset-top) + .75rem)); }
+    .top-actions { display: flex; align-items: center; gap: .75rem; }
+    #install { padding: .35rem .8rem; font-size: .8rem; white-space: nowrap; }
+    #updated { text-align: right; }
+    .ios-hint { margin-top: 1rem; display: flex; gap: .75rem; align-items: flex-start; border-radius: 1rem; padding: .75rem 1rem;
+      font-size: .875rem; background: color-mix(in oklch, var(--deep-foreground) 12%, transparent); }
+    .ios-hint button { margin-left: auto; background: none; border: 0; font-size: 1.1rem; line-height: 1; opacity: .8; }
+    .offline { color: var(--accent); font-weight: 600; }
   </style>
 </head>
 <body>
@@ -195,7 +213,15 @@
     <div class="wrap">
       <div class="topline">
         <p class="brand display">Coastal<span>·</span>Conditions</p>
-        <p id="updated" class="tiny"></p>
+        <div class="top-actions">
+          <p id="updated" class="tiny"></p>
+          <button type="button" id="install" class="btn btn-accent" hidden>Install app</button>
+        </div>
+      </div>
+      <div id="iosHint" class="ios-hint" hidden>
+        <span>📲 Add this to your Home Screen: tap <strong>Share</strong> <span aria-hidden="true">⎋</span>, then
+          <strong>Add to Home Screen</strong>.</span>
+        <button type="button" id="iosHintClose" aria-label="Dismiss">✕</button>
       </div>
       <form id="search">
         <input id="q" type="search" placeholder="Search a beach or town, e.g. Nauset Beach" aria-label="Beach or town">
@@ -300,8 +326,11 @@
       return level ? `<span class="pill ${level}${big ? ' big' : ''}">${esc(s)}</span>` : esc(s);
     };
 
+    // The service worker marks responses served from its cache while offline (X-Offline).
+    let offline = false;
     async function getJson(url) {
       const r = await fetch(url);
+      offline = r.headers.get('X-Offline') === '1';
       const body = await r.json();
       if (body.error) throw new Error(body.error);
       return body;
@@ -379,7 +408,9 @@
       document.body.classList.toggle('has-place', !!place);
       $('intro').hidden = !!place;
       $('placeHead').hidden = !place;
-      $('updated').textContent = cond ? `Updated ${cond.generated}` : '';
+      $('updated').innerHTML = !cond ? '' : offline
+        ? `<span class="offline">Offline</span> · showing ${esc(cond.generated)}`
+        : `Updated ${esc(cond.generated.split(', ')[1]?.replace(/:\d\d /, ' ') ?? cond.generated)}`; // "7:09 PM"
       if (!place) return;
       const [first, ...rest] = place.name.split(',');
       $('placeName').textContent = first;
@@ -455,7 +486,9 @@
       const next = t.predictions.find(p => p.time >= t.now);
       const cells = t.predictions.map(p => {
         const cls = p.time < t.now ? ' past' : p === next ? ' next' : '';
-        return `<div class="tide-cell${cls}"><p class="tiny muted">${p.time.slice(0, 10) === t.today ? 'Today' : 'Tomorrow'} · ${p.type}</p>
+        const d = p.time.slice(0, 10);
+        const when = d === t.today ? 'Today' : d > t.today && Date.parse(d) - Date.parse(t.today) === 864e5 ? 'Tomorrow' : dayName(d, { weekday: 'short' });
+        return `<div class="tide-cell${cls}"><p class="tiny muted">${when} · ${p.type}</p>
           <p class="when">${clock(p.time)} <span>${p.feet.toFixed(1)} ft</span></p></div>`;
       }).join('');
       return tideChart(t.predictions, t.now) + `<div class="tide-grid">${cells}</div>
@@ -495,7 +528,7 @@
         const hour = +time.slice(0, 2);
         const newDay = day !== lastDay;
         lastDay = day;
-        const label = newDay ? (i === 0 ? 'Now' : dayName(day, { weekday: 'short' })) : '';
+        const label = newDay ? (i === 0 && !offline ? 'Now' : dayName(day, { weekday: 'short' })) : '';
         const hr = `${hour % 12 || 12}${hour < 12 ? 'a' : 'p'}`;
         // NWS forecasts a gust value every hour; only show ones that matter (15+ mph and well above the wind).
         const gust = h.gust != null && h.gust >= 15 && h.gust >= h.wind + 8 ? `G${h.gust}` : '';
@@ -609,11 +642,51 @@
         return status('Couldn’t load conditions: ' + e.message);
       }
       if (mine !== request) return;
+      // "Now" from this device's clock in the beach's time zone, so next-tide and past-tide
+      // marks stay right when the data came from the offline cache hours ago.
+      if (d.tides && !d.tides.error && d.timeZone) {
+        d.tides.now = new Intl.DateTimeFormat('sv-SE', { timeZone: d.timeZone, dateStyle: 'short', timeStyle: 'short' }).format(new Date());
+        d.tides.today = d.tides.now.slice(0, 10);
+      }
       busy(false);
-      status('');
+      status(offline ?'You’re offline, so these are the last conditions loaded on this device. Tides are predictions and still hold.' : '');
       cond = d;
       render();
     }
+
+    // ---------- installable app ----------
+    // Service worker: offline support. Registered after load so it never slows the first paint.
+    if ('serviceWorker' in navigator) {
+      addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+    }
+
+    const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+
+    // Android/desktop Chrome and Edge offer an install prompt we can trigger from our own button.
+    let installPrompt = null;
+    addEventListener('beforeinstallprompt', e => {
+      e.preventDefault();
+      installPrompt = e;
+      $('install').hidden = false;
+    });
+    $('install').addEventListener('click', async () => {
+      if (!installPrompt) return;
+      installPrompt.prompt();
+      await installPrompt.userChoice;
+      installPrompt = null;
+      $('install').hidden = true;
+    });
+    addEventListener('appinstalled', () => { $('install').hidden = true; });
+
+    // iPhone/iPad Safari has no install prompt, so show a one-time how-to (dismissal remembered).
+    const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    let hintDismissed = false;
+    try { hintDismissed = localStorage.getItem('iosHintDismissed') === '1'; } catch {}
+    $('iosHint').hidden = !(isIOS && !standalone && !hintDismissed);
+    $('iosHintClose').addEventListener('click', () => {
+      $('iosHint').hidden = true;
+      try { localStorage.setItem('iosHintDismissed', '1'); } catch {}
+    });
 
     $('search').addEventListener('submit', e => {
       e.preventDefault();

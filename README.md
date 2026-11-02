@@ -16,6 +16,8 @@ measured water temperature, today's forecast, today's and tomorrow's tides, and 
 - `test/` – parser unit tests: `npm test`.
 - `scripts/smoke-test.js` – runs both endpoints for 14 coastal spots: `node scripts/smoke-test.js [baseUrl]`.
   Uses fixed coordinates so it doesn't bulk-query OpenStreetMap search.
+- `manifest.webmanifest`, `sw.js`, `icons/` – installable app (Add to Home Screen) with offline support:
+  the last conditions loaded stay viewable without signal. Icons are drawn by `scripts/make-icons.ps1`.
 - `dev-server.js` – zero-dependency local server that mimics Vercel's routing.
 
 Run locally (Node 20+): `npm run dev` → http://localhost:3000 (restarts on file changes)

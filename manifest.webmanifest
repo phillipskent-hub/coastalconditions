@@ -1,0 +1,18 @@
+{
+  "name": "Coastal Conditions",
+  "short_name": "Coastal",
+  "description": "Rip current risk, surf, tides, wind, water temperature and marine forecast for any lower-48 US ocean beach, from NOAA.",
+  "id": "/",
+  "start_url": "/?source=app",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f8f4ec",
+  "theme_color": "#12304d",
+  "categories": ["weather", "sports", "travel"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
