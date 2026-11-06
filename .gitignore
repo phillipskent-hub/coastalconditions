@@ -2,3 +2,5 @@ node_modules/
 .vercel/
 .env*
 *.zip
+*.png
+!icons/*.png
