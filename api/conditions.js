@@ -1,10 +1,11 @@
 // Serverless function: GET /api/conditions?lat=..&lon=..&zone=ANZ231&station=8446493
 // Fetches NWS forecast (daily and hourly) + alerts, the surf zone forecast (rip currents), the
 // marine forecast for the zone, NOAA tide predictions, measured water temperature, and sun/moon
-// times from the US Naval Observatory, and returns them as one JSON payload for the page.
+// times from the US Naval Observatory, plus nearby surf cams from our catalog, and returns them as
+// one JSON payload for the page.
 // Use /api/locate first to get the zone and station for a place.
 import { getJson, sendJson, query } from '../lib/http.js';
-import { findStation, findZone, nearestTempStations } from '../lib/geo.js';
+import { findStation, findZone, nearestTempStations, nearbyCams } from '../lib/geo.js';
 import { segmentFor, headlines, surfZone } from '../lib/nws-text.js';
 import { localDate, localDateTime, utcOffsetHours, addDays, daysBetween, gridValueAt } from '../lib/time.js';
 
@@ -97,10 +98,12 @@ async function alerts(lat, lon, zone) {
   const seen = new Map();
   for (const f of [...land.features, ...marine.features]) {
     const p = f.properties;
-    seen.set(p.id, { event: p.event, severity: p.severity, headline: p.headline, description: p.description, ends: p.ends || p.expires });
+    seen.set(p.id, { event: p.event, severity: p.severity, headline: p.headline, description: p.description,
+      instruction: p.instruction, area: p.areaDesc, ends: p.ends || p.expires });
   }
-  return [...seen.values()];
+  return [...seen.values()].sort((a, b) => SEVERITY.indexOf(a.severity) - SEVERITY.indexOf(b.severity));
 }
+const SEVERITY = ['Extreme', 'Severe', 'Moderate', 'Minor', 'Unknown'];
 
 // Headlines like "...SMALL CRAFT ADVISORY IN EFFECT THROUGH SATURDAY MORNING..." only appear in the
 // text Coastal Waters Forecast (CWF), not the JSON, so the office's latest CWF is fetched too.
@@ -212,6 +215,9 @@ export default async function handler(req, res) {
     timeZone,
     // NWS's own radar page for the nearest radar site (a link, not embedded).
     radar: radar ? `https://radar.weather.gov/station/${radar}/standard` : null,
+    // NWS point forecast page; its "Hazardous Weather Conditions" box links each active alert.
+    nwsPage: `https://forecast.weather.gov/MapClick.php?lat=${lat}&lon=${lon}`,
+    cams: nearbyCams(lat, lon),
   };
   results.forEach((r, i) => {
     body[names[i]] = r.status === 'fulfilled' ? r.value : { error: String(r.reason?.message || r.reason) };

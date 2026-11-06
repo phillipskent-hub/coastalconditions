@@ -132,10 +132,22 @@
     .trend { font-weight: 600; color: var(--primary); }
 
     .alerts { display: flex; flex-direction: column; gap: .5rem; }
-    .alert-box { display: flex; gap: .75rem; padding: 1rem; border-radius: 1rem; background: var(--alert);
+    .alert-box { border-radius: 1rem; background: var(--alert);
       border: 1px solid color-mix(in oklch, var(--destructive) 30%, transparent); }
+    .alert-box.severe { border: 2px solid var(--destructive); }
+    .alert-box summary { display: flex; gap: .75rem; padding: 1rem; cursor: pointer; list-style: none; }
+    .alert-box summary::-webkit-details-marker { display: none; }
     .alert-box .icon { color: var(--destructive); }
-    .alert-box p:first-child { font-weight: 600; }
+    .alert-box .event { font-weight: 600; }
+    .alert-box .until { font-weight: 400; color: var(--muted-foreground); }
+    .alert-box .more { margin-left: auto; align-self: center; white-space: nowrap; font-size: .8rem; font-weight: 600; color: var(--primary); }
+    .alert-box .more::after { content: 'Details ▾'; }
+    .alert-box[open] .more::after { content: 'Less ▴'; }
+    .alert-body { padding: 0 1rem 1rem 2.6rem; }
+    .alert-body p + p { margin-top: .5rem; }
+    .alert-body .label { margin-top: .75rem; color: var(--destructive); }
+    .alert-body .label:first-child { margin-top: 0; }
+    .alert-body .link-pill { display: inline-block; margin-top: .5rem; background: var(--card); }
 
     .pill { display: inline-block; border-radius: 999px; font-weight: 600; padding: .125rem .5rem; font-size: .75rem; }
     .pill.big { padding: .25rem .75rem; font-size: .875rem; font-family: var(--font-sans); vertical-align: middle; }
@@ -178,6 +190,13 @@
     .link-pill { border-radius: 999px; border: 1px solid var(--input); padding: .375rem .75rem; font-size: .875rem;
       color: var(--primary); text-decoration: none; font-weight: 600; }
     .link-pill:hover { background: var(--secondary); }
+    .cams { margin-bottom: 1.25rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--border); }
+    .cams ul { list-style: none; margin: .5rem 0 0; padding: 0; display: grid; gap: .5rem; }
+    @media (min-width: 640px) { .cams ul { grid-template-columns: 1fr 1fr; } }
+    .cams a { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: .75rem; padding: .5rem .75rem;
+      text-decoration: none; color: inherit; }
+    .cams a:hover { background: var(--secondary); }
+    .cams .name { font-weight: 600; color: var(--primary); }
     .right-col { display: flex; flex-direction: column; gap: 1.25rem; }
 
     /* Hourly strip: one column per hour, scrolls sideways */
@@ -279,6 +298,7 @@
       <div class="two-col">
         <section class="card section">
           <div class="section-head"><h2 class="display">At the beach</h2></div>
+          <div id="cams" class="cams" hidden></div>
           <div id="beach"></div>
         </section>
         <div class="right-col">
@@ -488,11 +508,34 @@
         <div class="value${c.wordy ? ' wordy' : ''}">${c.value}</div><p class="sub">${c.sub}</p></div>`).join('');
     }
 
+    // Each alert is a native <details>: tap to expand the full NWS text. Warnings (Severe/Extreme) get
+    // a stronger look than advisories and statements.
     function renderAlerts() {
       const a = cond?.alerts;
-      $('alerts').innerHTML = !a || a.error ? '' : a.map(x => `<div class="alert-box"><span class="icon" aria-hidden="true">⚠</span>
-        <div><p>${esc(x.event)}</p><p class="small muted">${esc(x.headline)}</p></div></div>`).join('');
+      // Keep alerts the person opened open across refreshes.
+      const open = new Set([...$('alerts').querySelectorAll('details[open]')].map(d => d.dataset.key));
+      $('alerts').innerHTML = !a || a.error ? '' : a.map(x => `<details class="alert-box${/Severe|Extreme/.test(x.severity) ? ' severe' : ''}"
+        data-key="${esc(x.event + x.headline)}"${open.has(x.event + x.headline) ? ' open' : ''}>
+        <summary><span class="icon" aria-hidden="true">⚠</span>
+          <div><p class="event">${esc(x.event)}${x.ends ? `<span class="until"> · until ${esc(alertTime(x.ends))}</span>` : ''}</p>
+            <p class="small muted">${esc(x.headline)}</p></div>
+          <span class="more" aria-hidden="true"></span></summary>
+        <div class="alert-body small">
+          ${x.instruction ? `<p class="label">What to do</p>${alertText(x.instruction)}` : ''}
+          ${x.description ? `<p class="label">Details</p>${alertText(x.description)}` : ''}
+          ${cond.nwsPage ? `<p><a class="link-pill" href="${esc(cond.nwsPage)}" target="_blank" rel="noopener">View on weather.gov ↗</a></p>` : ''}
+        </div></details>`).join('');
     }
+    // NWS alert text is hard-wrapped at ~70 columns with blank lines between paragraphs, and
+    // uses "* WHAT...", "* WHERE..." bullets and "...HEADLINE..." lines.
+    const alertText = s => s.trim().split(/\n\s*\n/).map(para => {
+      const t = para.replace(/\s*\n\s*/g, ' ').trim().replace(/^\.\.\.(.*?)\.\.\.$/, '$1');
+      const m = t.match(/^\* ([A-Z][A-Z ]+?)\.\.\.(.*)$/);
+      return m ? `<p><strong>${esc(m[1][0] + m[1].slice(1).toLowerCase())}:</strong> ${esc(m[2])}</p>` : `<p>${esc(t)}</p>`;
+    }).join('');
+    // "2026-11-08T19:00:00-05:00" -> "Sun 7 PM", in the beach's time zone.
+    const alertTime = iso => new Date(iso).toLocaleString('en-US',
+      { weekday: 'short', hour: 'numeric', minute: '2-digit', timeZone: cond?.timeZone }).replace(':00', '');
 
     function renderTides(t) {
       const next = t.predictions.find(p => p.time >= t.now);
@@ -599,6 +642,16 @@
       $('radar').hidden = !cond?.radar;
       if (cond?.radar) $('radar').href = cond.radar;
       $('marine').innerHTML = !cond ? skeleton : failed(cond.marine) ?? renderMarine(cond.marine);
+      $('cams').hidden = !cond?.cams?.length;
+      if (cond?.cams?.length) $('cams').innerHTML = renderCams(cond.cams);
+    }
+
+    // Links out to the cam pages (not embedded: they're other sites' players, and video would stream
+    // whether or not anyone watches). Some Surfline cams need a Surfline subscription.
+    function renderCams(cams) {
+      return `<p class="label">Surf cams nearby</p><ul>${cams.map(c => `<li><a href="${esc(c.url)}" target="_blank" rel="noopener">
+        <span class="name">${esc(c.name)} ↗</span>
+        <span class="tiny muted">${c.km < 1 ? 'here' : Math.round(c.km * 0.621371) + ' mi'} · ${esc(c.network)}${c.free ? '' : ' (subscription)'}</span></a></li>`).join('')}</ul>`;
     }
 
     function render() { renderHeader(); renderGlance(); renderAlerts(); renderDetails(); }

@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "node --watch dev-server.js",
     "build-data": "node scripts/build-data.js",
+    "import-cams": "node scripts/import-cams.js",
     "test": "node --test test/"
   },
   "engines": {

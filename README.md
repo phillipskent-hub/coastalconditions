@@ -3,8 +3,8 @@
 Live at https://coastalconditions.app (the old plymouth-coastal.vercel.app address redirects there, see `vercel.json`).
 
 Shore conditions for beach-goers and anglers anywhere on the lower-48 US ocean coasts:
-active alerts, rip current risk and surf (NWS Surf Zone Forecast, where the local office issues one),
-measured water temperature, today's forecast, today's and tomorrow's tides, and the nearshore marine forecast.
+active alerts (tap for full details), rip current risk and surf (NWS Surf Zone Forecast, where the local office issues one),
+measured water temperature, today's forecast, today's and tomorrow's tides, the nearshore marine forecast, and links to nearby surf cams.
 
 - `index.html` – the page. Search a beach/town or use your location; pick among nearby tide stations
   and marine zones. The chosen spot goes in the URL (bookmark/share) and is remembered in the browser.
@@ -15,6 +15,8 @@ measured water temperature, today's forecast, today's and tomorrow's tides, and 
 - `lib/` – shared fetch helpers, distance math, and parsers for NWS text bulletins (`nws-text.js`).
 - `data/` – generated lookup tables (tide stations, water-temperature stations, simplified marine-zone
   outlines). Refresh with `npm run build-data`.
+- `US_Surf_Cams_East_West.xlsx` – surf cam catalog (Surfline + Surfchex, Atlantic and Pacific). After editing it,
+  run `npm run import-cams` to regenerate `data/surf-cams.js`. The page links to cams within 25 km (15 mi).
 - `test/` – parser unit tests: `npm test`.
 - `scripts/smoke-test.js` – runs both endpoints for 14 coastal spots: `node scripts/smoke-test.js [baseUrl]`.
   Uses fixed coordinates so it doesn't bulk-query OpenStreetMap search.
